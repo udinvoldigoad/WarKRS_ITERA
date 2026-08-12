@@ -1,0 +1,19 @@
+# ── Keamanan: JANGAN commit sesi login & data pribadi ─────────────
+# Profil browser (berisi sesi login SIAKAD)
+.warkrs-profile*/
+
+# Config & state (berisi COOKIE sesi login + target pribadi)
+warkrs-config.json
+warkrs-state.json
+warkrs-debug.txt
+
+# ── Dependensi & file sistem ───────────────────────────────────────
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# ── File temp / diagnostik ─────────────────────────────────────────
+_*.js
+_*.json
+_tmp/

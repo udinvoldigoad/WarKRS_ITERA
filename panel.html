@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WAR KRS Panel</title>
+<style>
+  :root {
+    --bg:        #0e1311;
+    --panel:     #131917;
+    --panel2:    #18201c;
+    --panel3:    #1e2823;
+    --border:    #27322c;
+    --border2:   #35423a;
+    --text:      #ecefea;
+    --muted:     #87948c;
+    --accent:    #58b98a;
+    --accent2:   #6cc99c;
+    --accent-dim:#1e3a2c;
+    --success:   #6fbf9a;
+    --warn:      #c2a06a;
+    --error:     #d3918e;
+    --info:      #8fb4c4;
+    --radius:    6px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh; overflow: hidden;
+    display: flex; flex-direction: column;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  /* ── Header ── */
+  .hdr {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 18px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .hdr .logo { font-family: Georgia, "Times New Roman", serif; font-size: 16px; font-weight: 600;
+    letter-spacing: .04em; color: var(--text); }
+  .hdr .logo .mk { color: var(--accent); }
+  .hdr .badge { font-size: 9px; padding: 2px 8px; border-radius: 2px;
+    color: var(--muted); border: 1px solid var(--border2);
+    text-transform: uppercase; letter-spacing: .14em; }
+  .hdr .spacer { flex: 1; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); transition: background .3s; }
+  .dot.idle { background: var(--success); }
+  .dot.work { background: var(--warn); }
+  .dot.war  { background: var(--error); }
+
+  /* ── Tabs ── */
+  .tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--panel); }
+  .tab { flex: 1; padding: 10px 4px; border: none; background: none; color: var(--muted);
+    cursor: pointer; font-size: 11px; font-weight: 600; letter-spacing: .03em;
+    border-bottom: 2px solid transparent; transition: color .15s, background .15s; }
+  .tab:hover { color: var(--text); background: var(--panel3); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: var(--panel2); }
+
+  /* ── Hint bar ── */
+  .hint { padding: 7px 16px; font-size: 10.5px; color: var(--muted);
+    background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .hint b { color: var(--accent); font-weight: 600; }
+
+  /* ── Body ── */
+  .body { flex: 1; overflow-y: auto; padding: 14px; scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+  .sec { display: none; }
+  .sec.active { display: block; }
+
+  .label { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase;
+    letter-spacing: .1em; margin: 14px 0 6px; }
+  .label:first-child { margin-top: 0; }
+
+  .inp, .txt, select.inp {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text); padding: 8px 10px;
+    font-size: 12px; outline: none; transition: border-color .15s; font-family: inherit;
+  }
+  .inp:focus, .txt:focus { border-color: var(--accent); }
+  .txt { resize: vertical; min-height: 64px; line-height: 1.5; margin-bottom: 8px; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+
+  .btn { border: 1px solid transparent; border-radius: var(--radius); cursor: pointer;
+    padding: 9px 12px; font-size: 12px; font-weight: 600; letter-spacing: .02em;
+    transition: background .15s, color .15s, border-color .15s; width: 100%; font-family: inherit; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #0a120e; }
+  .btn-primary:hover:not(:disabled) { background: var(--accent2); }
+  .btn-danger { background: transparent; color: var(--error); border-color: var(--border2); }
+  .btn-danger:hover:not(:disabled) { border-color: var(--error); background: rgba(211,145,142,.07); }
+  .btn-ghost { background: var(--panel2); color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-green { background: var(--accent); color: #0a120e; }
+  .btn-green:hover:not(:disabled) { background: var(--accent2); }
+  .btn-sm { padding: 6px 10px; font-size: 11px; width: auto; border-radius: var(--radius); }
+
+  /* ── Card status ── */
+  .card { background: var(--panel2); border: 1px solid var(--border);
+    border-top: 1px solid var(--border2);
+    border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px; }
+  .card .big { font-size: 22px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .card .sub { color: var(--muted); font-size: 11px; margin-top: 1px; }
+  .progbar { height: 5px; border-radius: 2px; background: var(--panel3); overflow: hidden; margin-top: 10px; }
+  .progbar > i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+
+  /* ── Daftar kelas (cari + tambah) ── */
+  .slist { display: flex; flex-direction: column; gap: 4px; max-height: 230px; overflow-y: auto; margin-top: 8px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; }
+  .sitem { display: flex; align-items: center; gap: 8px; background: var(--panel2);
+    border: 1px solid transparent; border-radius: 4px; padding: 5px 8px; font-size: 11px; }
+  .sitem:hover { border-color: var(--border2); }
+  .sitem .lb { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sitem .ik { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+  .sitem button { background: var(--panel3); color: var(--accent); border: 1px solid var(--border2);
+    cursor: pointer; font-size: 12px; width: 22px; height: 22px; line-height: 1; border-radius: 4px; font-weight: 700; flex-shrink: 0; }
+  .sitem button:hover:not(:disabled) { background: var(--accent); color: #0a120e; border-color: var(--accent); }
+  .sitem button:disabled { color: var(--muted); opacity: .4; cursor: default; }
+
+  /* ── Daftar target ── */
+  .clist { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+  .citem { background: var(--panel2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 9px 11px; display: flex; align-items: center; gap: 10px; }
+  .citem .info { flex: 1; min-width: 0; }
+  .citem .nm { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .citem .id { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+  .citem .lg { font-size: 10px; color: var(--warn); margin-top: 2px; word-break: break-word; }
+  .st { font-size: 9px; padding: 2px 8px; border-radius: 3px; font-weight: 600;
+    letter-spacing: .06em; white-space: nowrap; flex-shrink: 0; border: 1px solid transparent; }
+  .st.antri    { color: var(--muted);   border-color: rgba(135,148,140,.25); background: rgba(135,148,140,.08); }
+  .st.proses   { color: var(--info);    border-color: rgba(143,180,196,.3);  background: rgba(143,180,196,.08); }
+  .st.berhasil { color: var(--success); border-color: rgba(111,191,154,.3);  background: rgba(111,191,154,.08); }
+  .st.gagal    { color: var(--error);   border-color: rgba(211,145,142,.3);  background: rgba(211,145,142,.08); }
+  .del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px;
+    padding: 1px 5px; border-radius: 3px; flex-shrink: 0; }
+  .del:hover { color: var(--error); background: var(--panel3); }
+
+  /* ── Config ── */
+  .cfg { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .cfg .cl { font-size: 12px; }
+  .cfg .cs { color: var(--muted); font-size: 10px; }
+  .cfg input { width: 80px; text-align: right; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: var(--radius); padding: 6px 8px; font-size: 12px; }
+  .cfg input:focus { border-color: var(--accent); outline: none; }
+  .check { display: flex; align-items: center; gap: 8px; color: var(--text); cursor: pointer; margin-bottom: 8px; }
+  .check input { accent-color: var(--accent); width: auto; }
+
+  /* ── Log ── */
+  .log { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; line-height: 1.6; }
+  .lrow { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+  .lrow .t { color: var(--muted); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .lrow.success .m { color: var(--success); }
+  .lrow.error .m { color: var(--error); }
+  .lrow.warn .m { color: var(--warn); }
+  .lrow.info .m { color: var(--info); }
+
+  /* ── Modal ── */
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none;
+    align-items: center; justify-content: center; z-index: 50; }
+  .modal-bg.show { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--border2); border-radius: var(--radius);
+    padding: 16px; width: 92%; max-height: 80vh; overflow-y: auto; }
+  .modal h3 { font-size: 13px; margin-bottom: 10px; color: var(--text); }
+  .mopt { display: block; width: 100%; text-align: left; background: var(--panel2);
+    border: 1px solid var(--border); color: var(--text); border-radius: var(--radius);
+    padding: 8px 10px; margin-bottom: 6px; cursor: pointer; font-size: 12px; font-family: inherit; }
+  .mopt:hover { border-color: var(--accent); color: var(--accent); }
+
+  .empty { color: var(--muted); text-align: center; padding: 18px 0; font-size: 11px; }
+  .notice { color: var(--info); font-size: 11px; margin-top: 6px; line-height: 1.5; }
+
+  details summary { color: var(--muted); font-size: 11px; cursor: pointer; text-transform: uppercase;
+    letter-spacing: .1em; user-select: none; }
+  details summary:hover { color: var(--accent); }
+
+  ::selection { background: rgba(88,185,138,.28); color: var(--text); }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #44574c; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+  <div class="hdr">
+    <span class="logo">WAR <span class="mk">KRS</span></span>
+    <span class="badge">Panel</span>
+    <span class="spacer"></span>
+    <span id="dot" class="dot idle" title="Status"></span>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="target">Matkul</button>
+    <button class="tab" data-tab="config">Config</button>
+    <button class="tab" data-tab="log">Log</button>
+  </div>
+  <div class="hint">
+    Tab <b>SIAKAD</b> = halaman KRS (war berjalan di sana) &middot; tab ini = kontrol
+  </div>
+
+  <div class="body">
+
+    <!-- TARGET -->
+    <div class="sec active" id="sec-target">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-end">
+          <div>
+            <div class="big" id="progTxt">0/0</div>
+            <div class="sub">matkul berhasil terambil</div>
+          </div>
+          <div style="text-align:right">
+            <div class="big" id="sksTxt" style="font-size:16px">-</div>
+            <div class="sub">SKS</div>
+          </div>
+        </div>
+        <div class="progbar"><i id="progBar" style="width:0%"></i></div>
+      </div>
+
+      <div class="row" style="margin-bottom:0">
+        <button class="btn btn-primary" id="btnScan" style="flex:0 0 auto;width:auto;padding:9px 16px">Pindai</button>
+        <input class="inp" id="inpFind" placeholder="Cari matkul / kode / kelas…">
+      </div>
+      <div id="alist" class="slist"><div class="empty">Klik [Pindai] untuk memuat daftar kelas.</div></div>
+      <div class="notice" id="scanNote"></div>
+
+      <details style="margin-top:12px">
+        <summary>Tambah manual (ketik / paste)</summary>
+        <textarea class="txt" id="inpAdd" style="margin-top:8px" placeholder="Kapita Selekta - RA&#10;Jaringan Komputer - RB&#10;43106"></textarea>
+        <div class="row">
+          <button class="btn btn-primary btn-sm" id="btnAdd">Tambah</button>
+          <button class="btn btn-ghost btn-sm" id="btnClear">Bersihkan</button>
+        </div>
+      </details>
+
+      <div id="clist" class="clist"><div class="empty">Belum ada target. Pilih dari daftar di atas.</div></div>
+
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn btn-green" id="btnWar">MULAI WAR</button>
+        <button class="btn btn-danger" id="btnStop" style="display:none">HENTIKAN</button>
+      </div>
+      <div class="notice" id="warNote"></div>
+    </div>
+
+    <!-- CONFIG -->
+    <div class="sec" id="sec-config">
+      <label class="label">Browser</label>
+      <div class="row">
+        <select class="inp" id="cfgBrowser">
+          <option value="auto">Auto (deteksi)</option>
+          <option value="edge">Edge</option>
+          <option value="chrome">Chrome</option>
+          <option value="brave">Brave</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" id="btnBrowser">Terapkan</button>
+      </div>
+
+      <label class="label">Timing (ms)</label>
+      <div class="cfg"><div><div class="cl">Delay antar spam</div><div class="cs">jeda per percobaan</div></div><input id="cfgRetry" type="number"></div>
+      <div class="cfg"><div><div class="cl">Jitter</div><div class="cs">variasi acak</div></div><input id="cfgJitter" type="number"></div>
+      <div class="cfg"><div><div class="cl">Limit percobaan</div><div class="cs">0 = tanpa batas</div></div><input id="cfgLimit" type="number"></div>
+      <div class="cfg"><div><div class="cl">Delay antar matkul</div></div><input id="cfgBatch" type="number"></div>
+      <div class="cfg"><div><div class="cl">Cooldown proteksi</div></div><input id="cfgCooldown" type="number"></div>
+      <label class="check"><input type="checkbox" id="cfgSks"> Hentikan otomatis saat SKS penuh</label>
+
+      <label class="label">Notifikasi Telegram (opsional)</label>
+      <input class="inp" id="cfgTgTok" placeholder="Bot Token" style="margin-bottom:6px">
+      <input class="inp" id="cfgTgChat" placeholder="Chat ID" style="margin-bottom:10px">
+
+      <div class="row">
+        <button class="btn btn-primary btn-sm" id="btnCfgSave">Simpan</button>
+        <button class="btn btn-ghost btn-sm" id="btnTgTest">Test TG</button>
+      </div>
+      <button class="btn btn-danger" id="btnReset" style="margin-top:12px">Reset Semua State</button>
+    </div>
+
+    <!-- LOG -->
+    <div class="sec" id="sec-log">
+      <div class="log" id="logBox"><div class="empty">Log kosong.</div></div>
+    </div>
+  </div>
+
+  <!-- Modal ambigu -->
+  <div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3 id="modalTitle">Pilih kelas</h3>
+      <div id="modalOpts"></div>
+      <button class="btn btn-ghost" id="modalCancel">Batal</button>
+    </div>
+  </div>
+
+<script>
+"use strict";
+const api = (path, opts) => fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts));
+const post = (action, data) => api("/api/action", { method: "POST", body: JSON.stringify({ action, data: data || {} }) }).then((r) => r.json());
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+let state = { courses: [], config: {}, warRunning: false, availableLen: 0, lastStatus: "", sks: {} };
+let lastLog = 0;
+let availCache = [];
+let scanAdded = new Set();
+
+function setDot(mode) {
+  const d = $("dot");
+  d.className = "dot " + (mode === "war" ? "war" : mode === "work" ? "work" : "idle");
+}
+
+document.querySelectorAll(".tab").forEach((t) => {
+  t.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
+    document.querySelectorAll(".sec").forEach((x) => x.classList.remove("active"));
+    t.classList.add("active");
+    $("sec-" + t.dataset.tab).classList.add("active");
+  });
+});
+
+function render() {
+  const courses = state.courses || [];
+  const done = courses.filter((c) => c.status === "berhasil").length;
+  const total = courses.length;
+  $("progTxt").textContent = done + "/" + total;
+  $("progBar").style.width = total ? Math.round((done / total) * 100) + "%" : "0%";
+
+  const sks = state.sks || {};
+  $("sksTxt").textContent = sks.cap ? (sks.used != null ? sks.used + "/" + sks.cap : "max " + sks.cap) : "-";
+
+  if (!courses.length) {
+    $("clist").innerHTML = '<div class="empty">Belum ada target. Pilih dari daftar di atas.</div>';
+  } else {
+    $("clist").innerHTML = courses
+      .map((c, i) =>
+        '<div class="citem">' +
+        '<div class="info">' +
+          '<div class="nm">' + esc(c.name) + (c.kelas ? " <span style=\"color:#8aa399\">" + esc(c.kelas) + "</span>" : "") + "</div>" +
+          '<div class="id">' + esc(c.id) + (c.kode ? " &middot; " + esc(c.kode) : "") + (c.retries ? " &middot; coba " + c.retries : "") + "</div>" +
+          (c.log ? '<div class="lg">' + esc(c.log) + "</div>" : "") +
+        "</div>" +
+        '<span class="st ' + esc(c.status) + '">' + stLabel(c.status) + "</span>" +
+        (state.warRunning ? "" : '<button class="del" data-i="' + i + '" title="Hapus">&#10005;</button>') +
+        "</div>"
+      )
+      .join("");
+    document.querySelectorAll(".del").forEach((b) => b.addEventListener("click", () => post("remove", { id: courses[+b.dataset.i].id }).then(refresh)));
+  }
+
+  $("btnWar").style.display = state.warRunning ? "none" : "block";
+  $("btnStop").style.display = state.warRunning ? "block" : "none";
+  $("warNote").textContent = state.warRunning
+    ? "War sedang berjalan di tab SIAKAD - jangan tutup browser. " + (state.lastStatus || "")
+    : state.lastStatus && state.lastStatus.indexOf("Selesai") !== -1 ? state.lastStatus : "";
+  setDot(state.warRunning ? "war" : state.lastStatus && state.lastStatus.indexOf("berjalan") !== -1 ? "work" : "idle");
+}
+function stLabel(s) {
+  return { antri: "ANTRI", proses: "PROSES", berhasil: "OK", gagal: "GAGAL" }[s] || s;
+}
+
+function renderAvail() {
+  const q = ($("inpFind").value || "").toLowerCase().trim();
+  const list = q ? availCache.filter((c) => (c.label + " " + c.idkelas).toLowerCase().includes(q)) : availCache;
+  scanAdded = new Set((state.courses || []).map((c) => c.id));
+  const box = $("alist");
+  if (!availCache.length) {
+    box.innerHTML = '<div class="empty">Klik [Pindai] untuk memuat daftar kelas dari SIAKAD.</div>';
+    return;
+  }
+  if (!list.length) {
+    box.innerHTML = '<div class="empty">Tidak ada yang cocok dengan "' + esc(q) + '".</div>';
+    return;
+  }
+  const shown = list.slice(0, 100);
+  box.innerHTML = shown
+    .map((c) =>
+      '<div class="sitem"><span class="lb">' + esc(c.label) + '</span><span class="ik">' + esc(c.idkelas) + "</span>" +
+      '<button data-id="' + esc(c.idkelas) + '" ' + (scanAdded.has(c.idkelas) ? "disabled" : "") + ' title="Tambah">+</button></div>'
+    )
+    .join("") + (list.length > 100 ? '<div class="empty">+' + (list.length - 100) + " lagi - persempit pencarian.</div>" : "");
+  document.querySelectorAll("#alist .sitem button:not(:disabled)").forEach((b) =>
+    b.addEventListener("click", () => post("add", { id: b.dataset.id }).then(refresh))
+  );
+}
+
+async function loadAvail() {
+  try {
+    const r = await api("/api/available").then((x) => x.json());
+    availCache = r.list || [];
+    renderAvail();
+  } catch (e) {}
+}
+
+function renderConfig() {
+  const c = state.config || {};
+  if (document.activeElement !== $("cfgRetry")) $("cfgRetry").value = c.RETRY_DELAY_MS || 0;
+  if (document.activeElement !== $("cfgJitter")) $("cfgJitter").value = c.RETRY_JITTER_MS || 0;
+  if (document.activeElement !== $("cfgLimit")) $("cfgLimit").value = c.SPAM_LIMIT || 0;
+  if (document.activeElement !== $("cfgBatch")) $("cfgBatch").value = c.BATCH_DELAY_MS || 0;
+  if (document.activeElement !== $("cfgCooldown")) $("cfgCooldown").value = c.SECURITY_COOLDOWN_MS || 0;
+  $("cfgSks").checked = c.AUTO_STOP_SKS !== false;
+  if (document.activeElement !== $("cfgTgTok")) $("cfgTgTok").value = c.TELEGRAM_BOT_TOKEN || "";
+  if (document.activeElement !== $("cfgTgChat")) $("cfgTgChat").value = c.TELEGRAM_CHAT_ID || "";
+  $("cfgBrowser").value = c.BROWSER || "auto";
+}
+
+function renderLogs(rows) {
+  if (!rows || !rows.length) return;
+  const box = $("logBox");
+  if (lastLog === 0) box.innerHTML = "";
+  let html = "";
+  rows.forEach((l) => { html += '<div class="lrow ' + esc(l.type) + '"><span class="t">' + esc(l.ts) + "</span><span class=\"m\">" + esc(l.msg) + "</span></div>"; });
+  box.insertAdjacentHTML("beforeend", html);
+  box.scrollTop = box.scrollHeight;
+}
+
+let modalResolve = null;
+function showModal(title, opts) {
+  return new Promise((resolve) => {
+    modalResolve = resolve;
+    $("modalTitle").textContent = title;
+    $("modalOpts").innerHTML = opts
+      .map((o, i) => '<button class="mopt" data-i="' + i + '">' + esc(o) + "</button>")
+      .join("");
+    document.querySelectorAll(".mopt").forEach((b) =>
+      b.addEventListener("click", () => {
+        // Resolve DULUAN dengan pilihan user (jangan lewat hideModal yang resolve null)
+        modalResolve = null;
+        $("modalBg").classList.remove("show");
+        resolve(opts[+b.dataset.i]);
+      })
+    );
+    $("modalBg").classList.add("show");
+  });
+}
+$("modalCancel").addEventListener("click", () => {
+  $("modalBg").classList.remove("show");
+  if (modalResolve) {
+    const r = modalResolve;
+    modalResolve = null;
+    r(null);
+  }
+});
+
+$("btnAdd").addEventListener("click", async () => {
+  const text = $("inpAdd").value.trim();
+  if (!text) return;
+  const r = await post("add", { text });
+  if (r.ambiguous && r.ambiguous.length) {
+    const pick = await showModal("Ada beberapa pilihan - pilih prodi kamu:", r.ambiguous);
+    if (pick) {
+      await post("add", { id: pick.split(" ")[0] });
+      $("inpAdd").value = "";
+    }
+  } else {
+    $("inpAdd").value = "";
+  }
+  refresh();
+});
+$("btnClear").addEventListener("click", async () => { await post("clear"); refresh(); });
+$("btnWar").addEventListener("click", async () => { await post("war"); refresh(); });
+$("btnStop").addEventListener("click", async () => { await post("stop"); refresh(); });
+$("btnScan").addEventListener("click", async () => {
+  $("scanNote").textContent = "Memindai…";
+  const r = await post("scan");
+  if (r.ok) { $("scanNote").textContent = r.count + " kelas dimuat dari SIAKAD."; await loadAvail(); }
+  else $("scanNote").textContent = r.message || "Gagal memindai.";
+});
+$("inpFind").addEventListener("input", renderAvail);
+
+$("btnBrowser").addEventListener("click", async () => { await post("browser", { value: $("cfgBrowser").value }); refresh(); });
+$("btnCfgSave").addEventListener("click", async () => {
+  const sets = {
+    RETRY_DELAY_MS: +$("cfgRetry").value, RETRY_JITTER_MS: +$("cfgJitter").value,
+    SPAM_LIMIT: +$("cfgLimit").value, BATCH_DELAY_MS: +$("cfgBatch").value,
+    SECURITY_COOLDOWN_MS: +$("cfgCooldown").value, AUTO_STOP_SKS: $("cfgSks").checked,
+    TELEGRAM_BOT_TOKEN: $("cfgTgTok").value.trim(), TELEGRAM_CHAT_ID: $("cfgTgChat").value.trim(),
+  };
+  for (const [k, v] of Object.entries(sets)) await post("config_set", { key: k, value: v });
+  refresh();
+});
+$("btnTgTest").addEventListener("click", async () => { await post("tgtest"); refresh(); });
+$("btnReset").addEventListener("click", async () => {
+  if (confirm("Hapus SEMUA state (target, cache, config)?")) { await post("reset"); refresh(); }
+});
+
+let lastStateJson = "";
+async function refresh() {
+  try {
+    const r = await api("/api/state").then((x) => x.json());
+    const j = JSON.stringify(r.courses || []);
+    if (j !== lastStateJson) { lastStateJson = j; state.courses = r.courses || []; }
+    state.config = r.config || state.config;
+    state.warRunning = !!r.warRunning;
+    state.lastStatus = r.lastStatus || "";
+    state.sks = r.sks || {};
+    render();
+    renderAvail();
+    if (document.getElementById("sec-config").classList.contains("active")) renderConfig();
+  } catch (e) {}
+}
+async function refreshLogs() {
+  try {
+    const r = await api("/api/logs?since=" + lastLog).then((x) => x.json());
+    if (r.rows && r.rows.length) { lastLog = r.next; renderLogs(r.rows); }
+  } catch (e) {}
+}
+setInterval(refresh, 1000);
+setInterval(refreshLogs, 1500);
+refresh();
+refreshLogs();
+loadAvail();
+</script>
+</body>
+</html>

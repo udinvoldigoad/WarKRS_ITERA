@@ -1,0 +1,29 @@
+{
+  "name": "warkrs",
+  "version": "1.0.0",
+  "description": "WAR KRS - auto-enroll mata kuliah SIAKAD ITERA via panel browser (aktif dari terminal)",
+  "main": "warkrs-bot.js",
+  "scripts": {
+    "start": "node warkrs-bot.js panel",
+    "panel": "node warkrs-bot.js panel",
+    "menu": "node warkrs-bot.js",
+    "doctor": "node warkrs-bot.js doctor",
+    "war": "node warkrs-bot.js war"
+  },
+  "keywords": [
+    "siakad",
+    "itera",
+    "krs",
+    "warkrs",
+    "puppeteer",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "puppeteer-core": "^25.6.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
