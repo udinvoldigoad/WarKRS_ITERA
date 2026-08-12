@@ -22,7 +22,7 @@ Auto-enroll mata kuliah KRS dengan **panel UI di browser**, dijalankan dari **te
 ## Instalasi
 
 ```bash
-git clone https://github.com/<username>/warkrs.git
+git clone https://github.com/udinvoldigoad/WarKRS_ITERA.git
 cd warkrs
 npm install
 ```
