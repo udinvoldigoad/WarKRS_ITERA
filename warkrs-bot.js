@@ -536,6 +536,22 @@ function profileDirForBrowser() {
   return path.join(DIR, ".warkrs-profile-" + base);
 }
 
+// Deteksi proses browser yang sedang berjalan (bukan cuma lock file).
+// Windows: Edge "startup boost" berjalan di background TANPA lock file yang
+// terdeteksi, sehingga puppeteer.launch bisa HANG selamanya (hand-off ke
+// instance yang sudah jalan) → kita deteksi lebih awal biar langsung fallback.
+const childProcess = require("child_process");
+function isBrowserProcessRunning(browserName) {
+  try {
+    const procs = platform() === "win32"
+      ? childProcess.execFileSync("tasklist", ["/FI", `IMAGENAME eq ${browserName === "edge" ? "msedge" : browserName}.exe`, "/NH"], { encoding: "utf8", timeout: 5000 })
+      : childProcess.execFileSync("pgrep", ["-f", browserName === "edge" ? "msedge" : browserName], { encoding: "utf8", timeout: 5000 });
+    return /(msedge|chrome|brave)\.exe/i.test(procs) || /^\d+\s*$/m.test(procs);
+  } catch (e) {
+    return false;
+  }
+}
+
 async function launchBrowser() {
   const executablePath = findBrowser();
   if (!executablePath) {
@@ -550,8 +566,9 @@ async function launchBrowser() {
 
   // Pakai profil ASLI browser (default) → sesi login & data kamu ikut terbuka.
   // Syarat: browser harus ditutup dulu (profil terkunci saat browser berjalan).
-  // Kalau profil asli tidak tersedia / terkunci → FALLBACK otomatis ke profil
-  // terpisah supaya panel tetap terbuka (bukan gagal total / jendela blank).
+  // Kalau profil asli tidak tersedia / terkunci / prosesnya berjalan → FALLBACK
+  // otomatis ke profil terpisah supaya panel tetap terbuka (bukan gagal total
+  // atau jendela blank/about:blank yang tidak bisa dikontrol).
   const launchOpts = (dir) => ({
     executablePath,
     headless: false,
@@ -566,13 +583,26 @@ async function launchBrowser() {
     ],
   });
 
+  // Timeout keamanan: kalau launch tidak selesai (hang), anggap gagal.
+  async function launchWithTimeout(dir, ms = 20000) {
+    return Promise.race([
+      puppeteer.launch(launchOpts(dir)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout menunggu browser (kemungkinan proses lama masih berjalan)")), ms)),
+    ]);
+  }
+
   let userDataDir, usingReal = false;
   if (CONFIG.USE_REAL_PROFILE !== false) {
     const real = realProfilePath(browserName);
     // Lock file: Windows=SingletonLock, macOS/Linux=SingletonCookie+SingletonSocket
     const locks = ["SingletonLock", "SingletonCookie", "SingletonSocket"];
     const lockHits = real ? locks.map((l) => path.join(real, l)).filter((p) => fs.existsSync(p)) : [];
-    if (!real || !fs.existsSync(real)) {
+    const procRunning = isBrowserProcessRunning(browserName);
+    if (procRunning) {
+      log(`⚠ ${label} masih berjalan di background — pakai profil terpisah agar panel tidak blank.`, "warn");
+      log('   (Mau pakai profil asli berisi sesi login? Tutup dulu SEMUA jendela & proses ' + label + '. Atau: config set USE_REAL_PROFILE false)', "dim");
+      userDataDir = profileDirForBrowser();
+    } else if (!real || !fs.existsSync(real)) {
       log(`⚠ Profil asli ${label} tidak ditemukan — pakai profil terpisah.`, "warn");
       userDataDir = profileDirForBrowser();
     } else if (lockHits.length) {
@@ -587,14 +617,14 @@ async function launchBrowser() {
   }
 
   try {
-    return await puppeteer.launch(launchOpts(userDataDir));
+    return await launchWithTimeout(userDataDir);
   } catch (e) {
-    // Profil asli gagal dibuka (mis. "browser already running" walau lock
-    // tidak terdeteksi) → fallback ke profil terpisah, bukan langsung error.
+    // Profil asli gagal dibuka (throw ATAU hang/timeout) → fallback ke profil
+    // terpisah, bukan langsung error.
     if (usingReal) {
       log(`⚠ Profil asli ${label} tidak bisa dipakai (${String(e.message).slice(0, 120)}) — fallback ke profil terpisah.`, "warn");
       try {
-        return await puppeteer.launch(launchOpts(profileDirForBrowser()));
+        return await launchWithTimeout(profileDirForBrowser());
       } catch (e2) {
         throw new WarError("BROWSER", `Gagal membuka ${label}: ${e2.message}`);
       }
@@ -2375,13 +2405,30 @@ async function cmdPanel() {
   const page = await getPage(browser);
   panelPage = page;
 
-  // Tab 2: Panel UI (tab terpisah → bebas mixed-content/CSP)
+  // Tab 2: Panel UI (tab terpisah → bebas mixed-content/CSP). Kalau server
+  // belum siap / URL tidak kebuka, jangan biarkan user melihat tab blank —
+  // tunggu server siap lalu coba lagi sebelum menyerah.
   const panelTab = await browser.newPage();
-  try {
+  const openPanel = async () => {
     await panelTab.goto(PANEL_URL, { waitUntil: "domcontentloaded", timeout: 15000 });
+  };
+  try {
+    await openPanel();
     log("✅ Panel dibuka di tab baru — alihkan ke tab 'http://127.0.0.1:8765'.", "success");
   } catch (e) {
-    log("⚠ Gagal membuka tab panel: " + e.message, "warn");
+    log("⚠ Panel belum siap — mencoba lagi… (" + String(e.message).slice(0, 80) + ")", "warn");
+    let retried = false;
+    for (let i = 0; i < 5 && !retried; i++) {
+      await sleep(1500);
+      try {
+        await openPanel();
+        retried = true;
+      } catch (e2) {}
+    }
+    if (!retried) {
+      log("⚠ Gagal membuka tab panel setelah dicoba ulang: " + e.message, "error");
+      log("   Ketik manual di address bar: " + PANEL_URL, "warn");
+    }
   }
   try { await panelTab.bringToFront(); } catch (e) {}
 
