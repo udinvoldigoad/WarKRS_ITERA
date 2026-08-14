@@ -550,7 +550,23 @@ async function launchBrowser() {
 
   // Pakai profil ASLI browser (default) → sesi login & data kamu ikut terbuka.
   // Syarat: browser harus ditutup dulu (profil terkunci saat browser berjalan).
-  let userDataDir;
+  // Kalau profil asli tidak tersedia / terkunci → FALLBACK otomatis ke profil
+  // terpisah supaya panel tetap terbuka (bukan gagal total / jendela blank).
+  const launchOpts = (dir) => ({
+    executablePath,
+    headless: false,
+    userDataDir: dir,
+    defaultViewport: null, // ikut ukuran jendela asli (bukan dipaksa kecil)
+    args: [
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-blink-features=AutomationControlled",
+      "--disable-features=IsolateOrigins,site-per-process",
+      "--start-maximized", // buka jendela full-screen/maximized
+    ],
+  });
+
+  let userDataDir, usingReal = false;
   if (CONFIG.USE_REAL_PROFILE !== false) {
     const real = realProfilePath(browserName);
     // Lock file: Windows=SingletonLock, macOS/Linux=SingletonCookie+SingletonSocket
@@ -560,37 +576,30 @@ async function launchBrowser() {
       log(`⚠ Profil asli ${label} tidak ditemukan — pakai profil terpisah.`, "warn");
       userDataDir = profileDirForBrowser();
     } else if (lockHits.length) {
-      throw new WarError(
-        "BROWSER",
-        `${label} masih terbuka! Profil asli terkunci.\n   Tutup dulu SEMUA jendela ${label} (termasuk proses background), lalu coba lagi.\n   (Kalau mau pakai profil terpisah tanpa harus menutup browser: config set USE_REAL_PROFILE false)`
-      );
+      log(`⚠ ${label} sedang berjalan (profil asli terkunci) — otomatis pakai profil terpisah.`, "warn");
+      userDataDir = profileDirForBrowser();
     } else {
       userDataDir = real;
+      usingReal = true;
     }
   } else {
     userDataDir = profileDirForBrowser();
   }
 
   try {
-    const browser = await puppeteer.launch({
-      executablePath,
-      headless: false,
-      userDataDir,
-      defaultViewport: null, // ikut ukuran jendela asli (bukan dipaksa kecil)
-      args: [
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-features=IsolateOrigins,site-per-process",
-        "--start-maximized", // buka jendela full-screen/maximized
-      ],
-    });
-    return browser;
+    return await puppeteer.launch(launchOpts(userDataDir));
   } catch (e) {
-    throw new WarError(
-      "BROWSER",
-      `Gagal membuka ${label} dengan profil asli: ${e.message}\n   Kemungkinan ${label} masih terbuka — tutup dulu semua jendela/background, lalu coba lagi.`
-    );
+    // Profil asli gagal dibuka (mis. "browser already running" walau lock
+    // tidak terdeteksi) → fallback ke profil terpisah, bukan langsung error.
+    if (usingReal) {
+      log(`⚠ Profil asli ${label} tidak bisa dipakai (${String(e.message).slice(0, 120)}) — fallback ke profil terpisah.`, "warn");
+      try {
+        return await puppeteer.launch(launchOpts(profileDirForBrowser()));
+      } catch (e2) {
+        throw new WarError("BROWSER", `Gagal membuka ${label}: ${e2.message}`);
+      }
+    }
+    throw new WarError("BROWSER", `Gagal membuka ${label}: ${e.message}`);
   }
 }
 
