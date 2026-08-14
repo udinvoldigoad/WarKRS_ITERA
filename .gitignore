@@ -5,7 +5,7 @@
 # Config & state (berisi COOKIE sesi login + target pribadi)
 warkrs-config.json
 warkrs-state.json
-warkrs-debug.txt
+warkrs-debug-captcha.txt
 
 # Konfigurasi opencode (berisi API key MCP)
 opencode.json
