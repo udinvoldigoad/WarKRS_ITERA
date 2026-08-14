@@ -393,14 +393,30 @@ async function sendTelegram(text) {
   }
 }
 // ─── BROWSER (Edge/Chrome/Brave via puppeteer-core) ─────────────────────────
-const BROWSER_EXES = {
-  edge: "Microsoft\\Edge\\Application\\msedge.exe",
-  chrome: "Google\\Chrome\\Application\\chrome.exe",
-  brave: "BraveSoftware\\Brave-Browser\\Application\\brave.exe",
-};
+// Path lintas platform: Windows (Program Files / LOCALAPPDATA),
+// macOS (/Applications/*.app), Linux (/usr/bin, /opt, snap, flatpak).
 const BROWSER_LABELS = { edge: "Edge", chrome: "Chrome", brave: "Brave" };
 
+function platform() {
+  return process.platform; // "win32" | "darwin" | "linux"
+}
+
 function browserRoots() {
+  if (platform() === "darwin") {
+    return ["/Applications", process.env.HOME ? path.join(process.env.HOME, "Applications") : ""];
+  }
+  if (platform() === "linux") {
+    return [
+      "/usr/bin",
+      "/usr/local/bin",
+      "/opt/google/chrome",
+      "/opt/microsoft/msedge",
+      "/opt/brave.com/brave",
+      process.env.HOME ? path.join(process.env.HOME, ".local/bin") : "",
+      process.env.HOME ? path.join(process.env.HOME, ".local/share/applications") : "",
+    ];
+  }
+  // Windows
   return [
     process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)",
     process.env.PROGRAMFILES || "C:\\Program Files",
@@ -408,8 +424,29 @@ function browserRoots() {
   ];
 }
 
+// Nama file executable browser per platform.
+function browserExe(name) {
+  const mac = {
+    edge: "Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    chrome: "Google Chrome.app/Contents/MacOS/Google Chrome",
+    brave: "Brave Browser.app/Contents/MacOS/Brave Browser",
+  };
+  const linux = {
+    edge: "microsoft-edge",
+    chrome: "google-chrome",
+    brave: "brave-browser",
+  };
+  const win = {
+    edge: "Microsoft\\Edge\\Application\\msedge.exe",
+    chrome: "Google\\Chrome\\Application\\chrome.exe",
+    brave: "BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+  };
+  const map = platform() === "darwin" ? mac : platform() === "linux" ? linux : win;
+  return map[name] || "";
+}
+
 function findByName(name) {
-  const rel = BROWSER_EXES[name];
+  const rel = browserExe(name);
   if (!rel) return "";
   for (const root of browserRoots()) {
     const p = root ? path.join(root, rel) : "";
@@ -446,25 +483,41 @@ function currentBrowserLabel() {
   }
   const p = findBrowser();
   if (!p) return "(tidak ditemukan)";
-  return path.basename(p).replace(".exe", "");
+  return path.basename(p).replace(/\.exe$/i, "");
 }
 
 // Profil asli browser (yang biasa kamu pakai sehari-hari)
-const REAL_PROFILE_PATHS = {
-  edge: "Microsoft\\Edge\\User Data",
-  chrome: "Google\\Chrome\\User Data",
-  brave: "BraveSoftware\\Brave-Browser\\User Data",
-};
-
 function realProfilePath(name) {
-  const rel = REAL_PROFILE_PATHS[name];
+  const mac = {
+    edge: "Microsoft Edge",
+    chrome: "Google/Chrome",
+    brave: "BraveSoftware/Brave-Browser",
+  };
+  const linux = {
+    edge: "microsoft-edge",
+    chrome: "google-chrome",
+    brave: "brave-browser",
+  };
+  const win = {
+    edge: "Microsoft\\Edge\\User Data",
+    chrome: "Google\\Chrome\\User Data",
+    brave: "BraveSoftware\\Brave-Browser\\User Data",
+  };
+  if (platform() === "darwin") {
+    const root = process.env.HOME ? path.join(process.env.HOME, "Library/Application Support") : "";
+    return root && mac[name] ? path.join(root, mac[name]) : "";
+  }
+  if (platform() === "linux") {
+    const root = process.env.HOME ? path.join(process.env.HOME, ".config") : "";
+    return root && linux[name] ? path.join(root, linux[name]) : "";
+  }
   const root = process.env.LOCALAPPDATA || "";
-  return root && rel ? path.join(root, rel) : "";
+  return root && win[name] ? path.join(root, win[name]) : "";
 }
 
 function guessBrowserName(executablePath) {
-  const base = path.basename(executablePath || "").toLowerCase();
-  if (base.includes("msedge")) return "edge";
+  const base = (executablePath || "").toLowerCase();
+  if (base.includes("msedge") || base.includes("microsoft edge")) return "edge";
   if (base.includes("brave")) return "brave";
   if (base.includes("chrome")) return "chrome";
   return (CONFIG.BROWSER && BROWSER_LABELS[CONFIG.BROWSER]) ? CONFIG.BROWSER : "edge";
@@ -476,7 +529,7 @@ function profileDirForBrowser() {
   let base = "edge";
   if (name === "auto") {
     const p = findBrowser();
-    if (p) base = path.basename(p).replace(".exe", "");
+    if (p) base = guessBrowserName(p);
   } else {
     base = name;
   }
@@ -500,11 +553,13 @@ async function launchBrowser() {
   let userDataDir;
   if (CONFIG.USE_REAL_PROFILE !== false) {
     const real = realProfilePath(browserName);
-    const lock = real ? path.join(real, "SingletonLock") : "";
+    // Lock file: Windows=SingletonLock, macOS/Linux=SingletonCookie+SingletonSocket
+    const locks = ["SingletonLock", "SingletonCookie", "SingletonSocket"];
+    const lockHits = real ? locks.map((l) => path.join(real, l)).filter((p) => fs.existsSync(p)) : [];
     if (!real || !fs.existsSync(real)) {
       log(`⚠ Profil asli ${label} tidak ditemukan — pakai profil terpisah.`, "warn");
       userDataDir = profileDirForBrowser();
-    } else if (lock && fs.existsSync(lock)) {
+    } else if (lockHits.length) {
       throw new WarError(
         "BROWSER",
         `${label} masih terbuka! Profil asli terkunci.\n   Tutup dulu SEMUA jendela ${label} (termasuk proses background), lalu coba lagi.\n   (Kalau mau pakai profil terpisah tanpa harus menutup browser: config set USE_REAL_PROFILE false)`
@@ -1550,7 +1605,7 @@ function handleFatal(e) {
   } else if (e.code === "BROWSER") {
     log("⚠ Browser error: " + e.message, "error");
     if (!findBrowser()) {
-      log('   Chrome/Edge tidak ditemukan. Set manual: config set BROWSER_PATH "C:\\...\\chrome.exe"', "warn");
+      log('   Chrome/Edge/Brave tidak ditemukan. Set manual: config set BROWSER_PATH "<path ke browser>"', "warn");
     }
   } else if (e.code === "NETWORK") {
     log("🌐 Gagal jaringan: " + e.message, "error");

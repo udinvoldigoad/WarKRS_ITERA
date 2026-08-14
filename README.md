@@ -123,6 +123,7 @@ erDiagram
 
 - **Node.js** v18+ (disarankan v20+)
 - **Chrome / Edge / Brave** terpasang
+- **Cross-platform**: Windows, macOS, Linux
 
 ```bash
 git clone https://github.com/udinvoldigoad/WarKRS_ITERA.git
