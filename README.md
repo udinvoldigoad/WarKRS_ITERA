@@ -133,17 +133,98 @@ npm install
 
 ---
 
-## 🕹 Cara Pakai (paling cepat)
+## 🕹 Cara Pakai
 
-```bash
-npm start          # atau double-click KLIK-UNTUK-WAR.bat
+Berikut alur lengkap untuk **Windows**, **macOS**, dan **Linux**. Prinsipnya sama — bedanya hanya cara membuka terminal dan menjalankan perintah pertama.
+
+---
+
+### 🪟 Windows
+
+**1) Buka terminal**
+
+Klik kanan di folder `warkrs` → **Open in Terminal** (atau buka `PowerShell`/`CMD` lalu `cd` ke folder proyek).
+
+**2) Install dependensi** (cukup sekali)
+
+```powershell
+npm install
 ```
 
-1. **Tutup browser kamu** (profil asli terkunci saat browser jalan).
-2. Browser otomatis terbuka dengan 2 tab: **Panel** (`http://127.0.0.1:8765`) + **SIAKAD**.
-3. Kalau belum login → buka tab SIAKAD → login sekali (tersimpan). *Opsional: isi NIM + Password di tab Config agar **login ulang otomatis** saat sesi kedaluwarsa.*
-4. Di panel: klik **Pindai** → ketik di kolom cari → klik **+** pada matkul tujuan.
-5. Klik **MULAI WAR** — pantau status di panel, lihat SIAKAD di tab sebelah.
+**3) Jalankan panel**
+
+```powershell
+npm start
+```
+
+> 💡 Atau **double-click `KLIK-UNTUK-WAR.bat`** — langsung jalan tanpa buka terminal.
+
+**4) Tutup browser kamu** (profil asli terkunci saat browser jalan), lalu ikuti langkah umum di bawah.
+
+---
+
+### 🍏 macOS
+
+**1) Buka Terminal**
+
+`Cmd + Space` → ketik `Terminal` → `Enter`. Lalu masuk ke folder proyek:
+
+```bash
+cd "path/ke/folder/warkrs"
+```
+
+> 💡 Cara mudah: ketik `cd ` lalu seret folder ke jendela Terminal.
+
+**2) Install dependensi** (cukup sekali)
+
+```bash
+npm install
+```
+
+**3) Jalankan panel**
+
+```bash
+npm start
+```
+
+**4) Tutup browser kamu** (klik `Cmd + Q` pada Chrome/Edge/Brave), lalu ikuti langkah umum di bawah.
+
+---
+
+### 🐧 Linux
+
+**1) Buka terminal**
+
+`Ctrl + Alt + T`, lalu masuk ke folder proyek:
+
+```bash
+cd "path/ke/folder/warkrs"
+```
+
+**2) Install dependensi** (cukup sekali)
+
+```bash
+npm install
+```
+
+> Jika gagal karena izin: `npm install` tanpa `sudo` — atau gunakan Node.js via [nvm](https://github.com/nvm-sh/nvm).
+
+**3) Jalankan panel**
+
+```bash
+npm start
+```
+
+**4) Tutup browser kamu** (profil asli terkunci saat browser jalan), lalu ikuti langkah umum di bawah.
+
+---
+
+### ✅ Langkah Umum (setelah panel terbuka di semua OS)
+
+1. Browser otomatis terbuka dengan 2 tab: **Panel** (`http://127.0.0.1:8765`) + **SIAKAD**.
+2. Kalau belum login → buka tab SIAKAD → login sekali (tersimpan). *Opsional: isi NIM + Password di tab Config agar **login ulang otomatis** saat sesi kedaluwarsa.*
+3. Di panel: klik **Pindai** → ketik di kolom cari → klik **+** pada matkul tujuan.
+4. Klik **MULAI WAR** — pantau status di panel, lihat SIAKAD di tab sebelah.
 
 > **Penting**: Jangan tutup browser saat war berjalan. Kalau sesi kedaluwarsa, bot login ulang otomatis (atau tunggu login manual di tab SIAKAD) lalu war lanjut.
 
@@ -203,7 +284,6 @@ Contoh: `node warkrs-bot.js config set RETRY_DELAY_MS 8000`
 | `warkrs-config.json` | Cookie sesi login & kredensial |
 | `warkrs-state.json` | Target & data pribadi |
 | `.warkrs-profile-*` | Profil browser berisi sesi login |
-| `opencode.json` | API key MCP |
 | `captcha-debug/` | Gambar captcha hasil debug |
 
 Untuk pengguna baru: file config/state dibuat otomatis dengan nilai default — tidak perlu disertakan di repo.
