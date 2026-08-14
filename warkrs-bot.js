@@ -44,7 +44,7 @@ const DEFAULT_CONFIG = {
   TELEGRAM_BOT_TOKEN: "",                    // Isi jika pakai notif Telegram
   TELEGRAM_CHAT_ID: "",                      // Chat ID / user ID Telegram kamu
   BROWSER_PATH: "",                          // Path browser manual (kosongkan = pakai BROWSER)
-  BROWSER: "auto",                           // Pilihan browser: auto | edge | chrome | brave
+  BROWSER: "auto",                           // Pilihan browser: auto | chrome | brave
   USE_REAL_PROFILE: true,                    // true = pakai profil asli (harus tutup browser dulu), false = profil terpisah
   DEBUG_RESPONSE: false,                     // true = simpan respons mentah gagal ke warkrs-debug.txt
   AUTO_STOP_SKS: true,                       // true = hentikan war otomatis saat SKS sudah penuh
@@ -392,10 +392,10 @@ async function sendTelegram(text) {
     log("Telegram error: " + e.message, "warn");
   }
 }
-// ─── BROWSER (Edge/Chrome/Brave via puppeteer-core) ─────────────────────────
+// ─── BROWSER (Chrome/Brave via puppeteer-core) ──────────────────────────────
 // Path lintas platform: Windows (Program Files / LOCALAPPDATA),
 // macOS (/Applications/*.app), Linux (/usr/bin, /opt, snap, flatpak).
-const BROWSER_LABELS = { edge: "Edge", chrome: "Chrome", brave: "Brave" };
+const BROWSER_LABELS = { chrome: "Chrome", brave: "Brave" };
 
 function platform() {
   return process.platform; // "win32" | "darwin" | "linux"
@@ -410,7 +410,6 @@ function browserRoots() {
       "/usr/bin",
       "/usr/local/bin",
       "/opt/google/chrome",
-      "/opt/microsoft/msedge",
       "/opt/brave.com/brave",
       process.env.HOME ? path.join(process.env.HOME, ".local/bin") : "",
       process.env.HOME ? path.join(process.env.HOME, ".local/share/applications") : "",
@@ -427,17 +426,14 @@ function browserRoots() {
 // Nama file executable browser per platform.
 function browserExe(name) {
   const mac = {
-    edge: "Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
     chrome: "Google Chrome.app/Contents/MacOS/Google Chrome",
     brave: "Brave Browser.app/Contents/MacOS/Brave Browser",
   };
   const linux = {
-    edge: "microsoft-edge",
     chrome: "google-chrome",
     brave: "brave-browser",
   };
   const win = {
-    edge: "Microsoft\\Edge\\Application\\msedge.exe",
     chrome: "Google\\Chrome\\Application\\chrome.exe",
     brave: "BraveSoftware\\Brave-Browser\\Application\\brave.exe",
   };
@@ -457,7 +453,7 @@ function findByName(name) {
 
 function detectBrowsers() {
   const found = [];
-  for (const name of Object.keys(BROWSER_EXES)) {
+  for (const name of Object.keys(BROWSER_LABELS)) {
     if (findByName(name)) found.push(name);
   }
   return found;
@@ -467,7 +463,7 @@ function findBrowser() {
   if (CONFIG.BROWSER_PATH && fs.existsSync(CONFIG.BROWSER_PATH)) return CONFIG.BROWSER_PATH;
   const wanted = (CONFIG.BROWSER || "auto").toLowerCase();
   if (wanted === "auto") {
-    for (const name of ["edge", "chrome", "brave"]) {
+    for (const name of ["chrome", "brave"]) {
       const p = findByName(name);
       if (p) return p;
     }
@@ -489,17 +485,14 @@ function currentBrowserLabel() {
 // Profil asli browser (yang biasa kamu pakai sehari-hari)
 function realProfilePath(name) {
   const mac = {
-    edge: "Microsoft Edge",
     chrome: "Google/Chrome",
     brave: "BraveSoftware/Brave-Browser",
   };
   const linux = {
-    edge: "microsoft-edge",
     chrome: "google-chrome",
     brave: "brave-browser",
   };
   const win = {
-    edge: "Microsoft\\Edge\\User Data",
     chrome: "Google\\Chrome\\User Data",
     brave: "BraveSoftware\\Brave-Browser\\User Data",
   };
@@ -517,16 +510,15 @@ function realProfilePath(name) {
 
 function guessBrowserName(executablePath) {
   const base = (executablePath || "").toLowerCase();
-  if (base.includes("msedge") || base.includes("microsoft edge")) return "edge";
   if (base.includes("brave")) return "brave";
   if (base.includes("chrome")) return "chrome";
-  return (CONFIG.BROWSER && BROWSER_LABELS[CONFIG.BROWSER]) ? CONFIG.BROWSER : "edge";
+  return (CONFIG.BROWSER && BROWSER_LABELS[CONFIG.BROWSER]) ? CONFIG.BROWSER : "chrome";
 }
 
 // Profil browser terpisah per browser (fallback bila tidak pakai profil asli)
 function profileDirForBrowser() {
   const name = (CONFIG.BROWSER || "auto").toLowerCase();
-  let base = "edge";
+  let base = "chrome";
   if (name === "auto") {
     const p = findBrowser();
     if (p) base = guessBrowserName(p);
@@ -537,16 +529,16 @@ function profileDirForBrowser() {
 }
 
 // Deteksi proses browser yang sedang berjalan (bukan cuma lock file).
-// Windows: Edge "startup boost" berjalan di background TANPA lock file yang
+// Windows: browser "startup boost" berjalan di background TANPA lock file yang
 // terdeteksi, sehingga puppeteer.launch bisa HANG selamanya (hand-off ke
 // instance yang sudah jalan) → kita deteksi lebih awal biar langsung fallback.
 const childProcess = require("child_process");
 function isBrowserProcessRunning(browserName) {
   try {
     const procs = platform() === "win32"
-      ? childProcess.execFileSync("tasklist", ["/FI", `IMAGENAME eq ${browserName === "edge" ? "msedge" : browserName}.exe`, "/NH"], { encoding: "utf8", timeout: 5000 })
-      : childProcess.execFileSync("pgrep", ["-f", browserName === "edge" ? "msedge" : browserName], { encoding: "utf8", timeout: 5000 });
-    return /(msedge|chrome|brave)\.exe/i.test(procs) || /^\d+\s*$/m.test(procs);
+      ? childProcess.execFileSync("tasklist", ["/FI", `IMAGENAME eq ${browserName}.exe`, "/NH"], { encoding: "utf8", timeout: 5000 })
+      : childProcess.execFileSync("pgrep", ["-f", browserName], { encoding: "utf8", timeout: 5000 });
+    return /(chrome|brave)\.exe/i.test(procs) || /^\d+\s*$/m.test(procs);
   } catch (e) {
     return false;
   }
@@ -557,7 +549,7 @@ async function launchBrowser() {
   if (!executablePath) {
     throw new WarError(
       "BROWSER",
-      "Browser tidak ditemukan. Install Edge/Chrome/Brave, atau atur pilihan browser lewat menu [B], atau set BROWSER_PATH manual."
+      "Browser tidak ditemukan. Install Chrome/Brave, atau atur pilihan browser lewat menu [B], atau set BROWSER_PATH manual."
     );
   }
 
@@ -1644,7 +1636,7 @@ function handleFatal(e) {
   } else if (e.code === "BROWSER") {
     log("⚠ Browser error: " + e.message, "error");
     if (!findBrowser()) {
-      log('   Chrome/Edge/Brave tidak ditemukan. Set manual: config set BROWSER_PATH "<path ke browser>"', "warn");
+      log('   Chrome/Brave tidak ditemukan. Set manual: config set BROWSER_PATH "<path ke browser>"', "warn");
     }
   } else if (e.code === "NETWORK") {
     log("🌐 Gagal jaringan: " + e.message, "error");
@@ -2013,7 +2005,7 @@ async function cmdWar() {
 
 function cmdHelp() {
   console.log(`
-${ANSI.bold}⚔ WAR KRS v3 — BOT EDITION (Chrome/Edge otomatis)${ANSI.reset}
+${ANSI.bold}⚔ WAR KRS v3 — BOT EDITION (Chrome/Brave otomatis)${ANSI.reset}
 ${ANSI.gray}Jalan di terminal, browser dikelola script — tahan refresh & lolos Cloudflare.${ANSI.reset}
 
 ${ANSI.bold}PERINTAH:${ANSI.reset}
@@ -2125,7 +2117,7 @@ async function cmdMenu() {
   if (__rl) { __rl.close(); __rl = null; }
 }
 
-// Pilih browser yang dipakai (Edge / Chrome / Brave / Auto)
+// Pilih browser yang dipakai (Chrome / Brave / Auto)
 async function cmdChooseBrowser() {
   const question = getAsk();
 
@@ -2133,14 +2125,13 @@ async function cmdChooseBrowser() {
   console.log("\n  🌐 Pilih Browser untuk WAR KRS");
   console.log(`  ${ANSI.gray}─────────────────────────────────────────${ANSI.reset}`);
   console.log(`  [1] ${ANSI.bold}Auto${ANSI.reset} (pakai yang terdeteksi pertama)`);
-  console.log(`  [2] ${ANSI.bold}Edge${ANSI.reset}${available.includes("edge") ? " ✓ terpasang" : " (tidak terpasang)"}`);
-  console.log(`  [3] ${ANSI.bold}Chrome${ANSI.reset}${available.includes("chrome") ? " ✓ terpasang" : " (tidak terpasang)"}`);
-  console.log(`  [4] ${ANSI.bold}Brave${ANSI.reset}${available.includes("brave") ? " ✓ terpasang" : " (tidak terpasang)"}`);
+  console.log(`  [2] ${ANSI.bold}Chrome${ANSI.reset}${available.includes("chrome") ? " ✓ terpasang" : " (tidak terpasang)"}`);
+  console.log(`  [3] ${ANSI.bold}Brave${ANSI.reset}${available.includes("brave") ? " ✓ terpasang" : " (tidak terpasang)"}`);
   console.log(`  ${ANSI.gray}─────────────────────────────────────────${ANSI.reset}`);
   console.log(`  Saat ini: ${ANSI.bold}${currentBrowserLabel()}${ANSI.reset}`);
 
-  const pick = (await question("\nPilih browser (1-4, Enter = batal): ")).trim();
-  const map = { "1": "auto", "2": "edge", "3": "chrome", "4": "brave" };
+  const pick = (await question("\nPilih browser (1-3, Enter = batal): ")).trim();
+  const map = { "1": "auto", "2": "chrome", "3": "brave" };
   const val = map[pick];
   if (!val) {
     console.log("\nBatal — browser tidak diubah.");

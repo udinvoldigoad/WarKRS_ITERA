@@ -2,7 +2,7 @@
 
 > Auto-enroll mata kuliah KRS dengan **panel UI di browser**, dijalankan dari **terminal**. Tahan refresh SIAKAD, lolos Cloudflare & Turnstile, login ulang otomatis, dan progres tersimpan aman.
 
-**WAR KRS** adalah bot automasi pengisian KRS (Kartu Rencana Studi) untuk SIAKAD ITERA. Bot mengendalikan browser asli kamu (Edge / Chrome / Brave) dengan profil pribadi, membuka panel kontrol di tab terpisah, lalu melakukan request pendaftaran matkul secara otomatis sampai berhasil — dengan deteksi anti-bot yang mumpuni.
+**WAR KRS** adalah bot automasi pengisian KRS (Kartu Rencana Studi) untuk SIAKAD ITERA. Bot mengendalikan browser asli kamu (Chrome / Brave) dengan profil pribadi, membuka panel kontrol di tab terpisah, lalu melakukan request pendaftaran matkul secara otomatis sampai berhasil — dengan deteksi anti-bot yang mumpuni.
 
 ---
 
@@ -13,7 +13,7 @@
 | 🖥 **Panel UI** | Cari & klik `+` untuk menambah matkul, pantau status war real-time — tanpa ngetik command |
 | 🛡 **Lolos Cloudflare** | Stealth mode + auto-klik Turnstile "Verify you are human" di semua frame |
 | 🔑 **Login ulang otomatis** | Isi email + password + pecahkan **captcha matematika** via OCR (tesseract.js) |
-| 🌐 **Multi-browser** | Edge / Chrome / Brave, pakai profil asli kamu |
+| 🌐 **Multi-browser** | Chrome / Brave, pakai profil asli kamu |
 | ⚔ **War otomatis** | Retry + jitter acak, backoff cooldown, stop saat error permanen |
 | 📊 **Deteksi SKS** | Hentikan otomatis saat jatah SKS penuh |
 | 💬 **Notifikasi Telegram** | Pantau dari HP saat war berjalan |
@@ -110,7 +110,7 @@ erDiagram
     }
     BROWSER ||--o{ COURSE : "didaftarkan ke"
     BROWSER {
-        string nama "Edge|Chrome|Brave"
+        string nama "Chrome|Brave"
         string profileDir
     }
 ```
@@ -122,7 +122,7 @@ erDiagram
 **Persyaratan:**
 
 - **Node.js** v18+ (disarankan v20+)
-- **Chrome / Edge / Brave** terpasang
+- **Chrome / Brave** terpasang
 - **Cross-platform**: Windows, macOS, Linux
 
 ```bash
@@ -187,7 +187,7 @@ npm install
 npm start
 ```
 
-**4) Tutup browser kamu** (klik `Cmd + Q` pada Chrome/Edge/Brave), lalu ikuti langkah umum di bawah.
+**4) Tutup browser kamu** (klik `Cmd + Q` pada Chrome/Brave), lalu ikuti langkah umum di bawah.
 
 ---
 
@@ -260,7 +260,7 @@ Config disimpan di `warkrs-config.json` (dibuat otomatis). Key penting:
 
 | Key | Default | Fungsi |
 |---|---|---|
-| `BROWSER` | `auto` | `auto` / `edge` / `chrome` / `brave` |
+| `BROWSER` | `auto` | `auto` / `chrome` / `brave` |
 | `USE_REAL_PROFILE` | `true` | Pakai profil asli browser (harus tutup browser dulu) |
 | `RETRY_DELAY_MS` | `5000` | Jeda antar percobaan |
 | `RETRY_JITTER_MS` | `3000` | Variasi acak biar tidak terlihat bot |
