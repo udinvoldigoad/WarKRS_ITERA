@@ -5,6 +5,10 @@
 const fs = require("fs");
 const path = require("path");
 const puppeteer = require("puppeteer-core");
+let Tesseract = null;
+try {
+  Tesseract = require("tesseract.js");
+} catch (e) {}
 
 // ─── READLINE BERSAMA (satu instance untuk semua prompt) ─────────────────────
 // Penting: jangan buat readline baru per prompt — dua interface di stdin yang
@@ -44,6 +48,8 @@ const DEFAULT_CONFIG = {
   USE_REAL_PROFILE: true,                    // true = pakai profil asli (harus tutup browser dulu), false = profil terpisah
   DEBUG_RESPONSE: false,                     // true = simpan respons mentah gagal ke warkrs-debug.txt
   AUTO_STOP_SKS: true,                       // true = hentikan war otomatis saat SKS sudah penuh
+  SIAKAD_USERNAME: "",                       // NIM/login SIAKAD (untuk login ulang otomatis)
+  SIAKAD_PASSWORD: "",                       // Password SIAKAD (untuk login ulang otomatis)
 };
 
 // ─── LOAD / SAVE ────────────────────────────────────────────────────────────
@@ -111,6 +117,15 @@ let panelSks = {};
 let panelBrowser = null;
 let panelPage = null;
 let warActive = false;
+let securityStrike = 0; // jumlah kenangan Cloudflare beruntun → backoff bertahap
+
+// Cooldown Cloudflare naik bertahap tiap kena beruntun (60s → 120s → 240s → …,
+// maks 5 menit). Reset ke nilai dasar setelah satu percobaan sukses/bersih.
+function securityCooldownMs() {
+  const base = CONFIG.SECURITY_COOLDOWN_MS || 60000;
+  const mult = Math.pow(2, Math.min(securityStrike, 4));
+  return Math.min(base * mult, 300000);
+}
 
 function pushPanelLog(type, msg) {
   panelLogs.push({ seq: ++panelLogSeq, ts: ts(), type, msg });
@@ -248,7 +263,7 @@ function analyzeEnrollResponse(status, contentType, text, finalUrl, signals) {
     return { tokenExpired: true, message: "CSRF token kedaluwarsa (HTTP 419)." };
   }
   if (looksLikeSecurityPage(status, text)) {
-    return { security: true, message: "Kena proteksi/Cloudflare (HTTP " + status + ")." };
+    return { security: true, message: `Kena proteksi/Cloudflare (HTTP ${status}).` };
   }
 
   if (contentType.includes("json")) {
@@ -317,10 +332,11 @@ function analyzeEnrollResponse(status, contentType, text, finalUrl, signals) {
 }
 
 function looksLikeSecurityPage(status, html) {
-  return (
-    status === 403 ||
-    (typeof html === "string" && /Pemeriksaan Keamanan|Memverifikasi Browser|Memeriksa Keamanan Browser/i.test(html))
-  );
+  const t = String(html || "");
+  if (status === 403 || status === 429 || status === 503) return true;
+  if (/Pemeriksaan Keamanan|Memverifikasi Browser|Memeriksa Keamanan Browser/i.test(t)) return true;
+  // Marker Cloudflare Turnstile / challenge (berbagai bahasa & versi)
+  return /cf-chl|cf_chl_|challenge-platform|turnstile|cf-mitigated|attention required|checking your browser|verify you are human|verifying you are human|just a moment|enable javascript and cookies/i.test(t);
 }
 
 function describeHtmlResponse(status, text) {
@@ -547,6 +563,106 @@ async function waitOutChallenge(page, timeoutMs = 90000) {
   return false;
 }
 
+// Klik checkbox Cloudflare Turnstile ("ceklis verifikasi manusia") yang muncul
+// sebagai iframe/elemen di halaman. Cek SEMUA frame (termasuk halaman utama),
+// cocokkan aria-label "Verify you are human" / teks verifikasi. Browser asli
+// akan otomatis lolos setelah checkbox diklik.
+const TURNSTILE_LABEL_RE = /verify you are human|i'?m not a robot|are you human|verif|manusia|robot|captcha/i;
+
+// Cari checkbox turnstile dalam sebuah frame. Kembalikan ElementHandle biar bisa
+// diklik dengan mouse asli (elementHandle.click() → boundingBox + mouse events).
+async function findTurnstileCheckbox(frame) {
+  try {
+    const handle = await frame.evaluateHandle(
+      (reSrc) => {
+        const re = new RegExp(reSrc, "i");
+        const cands = Array.from(document.querySelectorAll('input[type="checkbox"], [role="checkbox"], [aria-checked]'));
+        const byLabel = cands.filter((cb) =>
+          re.test(cb.getAttribute("aria-label") || "") ||
+          re.test(cb.getAttribute("title") || "") ||
+          re.test(cb.getAttribute("aria-describedby") || "")
+        );
+        return byLabel.length ? byLabel[0] : cands[0] || null;
+      },
+      TURNSTILE_LABEL_RE.source
+    );
+    const isNull = await handle.evaluate((el) => el === null).catch(() => true);
+    if (isNull) return null;
+    return handle;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Klik checkbox via mouse asli + JS click (kadang salah satu saja tidak cukup).
+async function clickCheckboxReal(handle) {
+  try {
+    const box = await handle.boundingBox();
+    if (box && box.width > 0 && box.height > 0) {
+      const cx = box.x + box.width / 2;
+      const cy = box.y + box.height / 2;
+      const page = handle.executionContext().frame().page();
+      await page.mouse.move(cx, cy);
+      await page.mouse.click(cx, cy);
+    }
+  } catch (e) {}
+  try { await handle.evaluate((el) => { if (el && !el.checked) el.click(); }); } catch (e) {}
+}
+
+async function solveTurnstile(page, timeoutMs = 30000) {
+  const start = Date.now();
+  let verified = false;
+  while (Date.now() - start < timeoutMs) {
+    const frames = page.frames();
+
+    let clicked = false;
+    let isChecked = false;
+    let anyFound = false;
+    for (const f of frames) {
+      const handle = await findTurnstileCheckbox(f);
+      if (!handle) continue;
+      anyFound = true;
+      let checked = false;
+      try { checked = await handle.evaluate((el) => !!(el && el.checked)); } catch (e) {}
+      if (!checked) {
+        log(`✅ Turnstile: checkbox ditemukan (${f === page.mainFrame() ? "halaman utama" : "iframe " + f.url().slice(0, 60)}) — mengklik...`, "info");
+        await clickCheckboxReal(handle);
+        clicked = true;
+      } else {
+        isChecked = true;
+      }
+      try { await handle.dispose(); } catch (e) {}
+    }
+
+    if (isChecked) verified = true;
+
+    // Status halaman setelah klik: masih adakah iframe challenge / teks verifikasi?
+    const state = await page
+      .evaluate((labelRe) => {
+        const hasIframe = !!document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"], iframe[src*="cdn-cgi"]');
+        const b = document.body;
+        const txt = (b ? b.innerText || "" : "") + " " + (document.title || "");
+        const verifying = /memverifikasi|verifying|periksa keamanan|memeriksa keamanan|checking your browser|just a moment|are you human/i.test(txt);
+        const mainCheckbox = Array.from(document.querySelectorAll('input[type="checkbox"], [role="checkbox"]')).some((cb) =>
+          new RegExp(labelRe, "i").test(cb.getAttribute("aria-label") || cb.getAttribute("title") || "")
+        );
+        return { hasIframe, verifying, mainCheckbox };
+      }, TURNSTILE_LABEL_RE.source)
+      .catch(() => ({ hasIframe: false, verifying: false, mainCheckbox: false }));
+
+    // Lolos: tidak ada iframe, tidak ada teks verifying, tidak ada checkbox.
+    if (!state.hasIframe && !state.verifying && !state.mainCheckbox) return true;
+    // Sudah tercentang & tidak verifying → lolos.
+    if (verified && !state.verifying) return true;
+    // Tidak ada elemen ditemukan & tidak verifying & tidak ada iframe → lolos.
+    if (!anyFound && !state.verifying && !state.hasIframe) return true;
+
+    if (clicked) await sleep(1200);
+    else await sleep(700);
+  }
+  return false;
+}
+
 async function isLoggedIn(page) {
   return page
     .evaluate(() => {
@@ -568,7 +684,14 @@ async function ensureKrsPage(page) {
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: CONFIG.HTTP_TIMEOUT_MS });
   } catch (e) {} // timeout navigasi bukan masalah selama challenge belum selesai
-  const ok = await waitOutChallenge(page);
+  let ok = await waitOutChallenge(page);
+  if (!ok) {
+    // Challenge masih muncul — kemungkinan ada checkbox Turnstile → klik otomatis.
+    ok = await solveTurnstile(page);
+    if (!ok) ok = await waitOutChallenge(page, 45000);
+  }
+  // Setelah challenge hilang, kadang Turnstile baru muncul → pastikan lolos.
+  await solveTurnstile(page);
   if (!ok) {
     throw new WarError("SECURITY", "Cloudflare challenge tidak teratasi otomatis. Cek jendela browser.");
   }
@@ -677,7 +800,10 @@ async function enrollCourse(page, course) {
             credentials: "same-origin",
             headers: {
               "Content-Type": "application/x-www-form-urlencoded",
-              "X-Requested-With": "XMLHttpRequest",
+              "Accept": "*/*",
+              "Sec-Fetch-Site": "same-origin",
+              "Sec-Fetch-Mode": "cors",
+              "Sec-Fetch-Dest": "empty",
             },
             body: body,
           });
@@ -742,6 +868,349 @@ async function waitForLogin(page, timeoutMs = 600000) {
   }
   return false;
 }
+
+// Baca gambar captcha → teks soal. Gambar di-fetch DI DALAM halaman (cookie/
+// TLS browser asli ikut) supaya server SSO menghitung jawabannya di sesi yang
+// sama. Hasil dijadikan data-URL lalu di-OCR dengan tesseract.js.
+let __ocrWorker = null;
+
+// Ambil gambar captcha & buat beberapa varian preprocessing (perbesar 4x +
+// binarize/grayscale/invert) biar digit bersih & tesseract tidak salah baca.
+// Hasil: { originals:[dataUrl asli], variants:[bw,bw2,gray,inv] }
+async function fetchCaptchaVariants(page) {
+  return page
+    .evaluate(async () => {
+      const img = document.querySelector('img[src*="cpch"], img[src*="captcha"], img[alt*="captcha" i]');
+      if (!img) return { originals: [], variants: [] };
+      const src = img.currentSrc || img.src;
+      if (!src) return { originals: [], variants: [] };
+      const blob = await fetch(src, { credentials: "same-origin" })
+        .then((r) => r.blob())
+        .catch(() => null);
+      if (!blob) return { originals: [], variants: [] };
+      const bmp = await createImageBitmap(blob).catch(() => null);
+      if (!bmp) return { originals: [], variants: [] };
+      const originals = [];
+      try { originals.push(bmp.toDataURL ? bmp.toDataURL() : ""); } catch (e) {}
+      const W = bmp.width, H = bmp.height, scale = 4;
+      const make = (mode) => {
+        const c = document.createElement("canvas");
+        c.width = W * scale; c.height = H * scale;
+        const ctx = c.getContext("2d");
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(bmp, 0, 0, c.width, c.height);
+        const id = ctx.getImageData(0, 0, c.width, c.height);
+        const d = id.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const r = d[i], g = d[i + 1], b = d[i + 2];
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          if (mode === "bw") { const v = lum > 128 ? 255 : 0; d[i] = d[i + 1] = d[i + 2] = v; }
+          else if (mode === "bw2") { const v = lum > 100 ? 255 : 0; d[i] = d[i + 1] = d[i + 2] = v; }
+          else if (mode === "gray") { d[i] = d[i + 1] = d[i + 2] = lum; }
+          else { const v = lum > 128 ? 0 : 255; d[i] = d[i + 1] = d[i + 2] = v; }
+        }
+        ctx.putImageData(id, 0, 0);
+        return c.toDataURL("image/png");
+      };
+      return {
+        originals,
+        variants: [make("bw"), make("bw2"), make("gray"), make("inv")],
+      };
+    })
+    .catch(() => ({ originals: [], variants: [] }));
+}
+
+function ocrBuffer(buf) {
+  return __ocrWorker.recognize(buf).then((r) => String(r.data.text || "").trim()).catch(() => "");
+}
+
+// Simpan gambar captcha untuk debugging (asal + varian preprocessing).
+function saveCaptchaDebug(originals, variants, tag) {
+  try {
+    const dir = path.join(DIR, "captcha-debug");
+    fs.mkdirSync(dir, { recursive: true });
+    const name = `${Date.now()}-${tag || "x"}`;
+    const all = [...originals, ...variants];
+    all.forEach((d, i) => {
+      if (!d || !d.startsWith("data:")) return;
+      const ext = (d.split(";")[0] || "").split("/")[1] || "png";
+      fs.writeFileSync(path.join(dir, `${name}-${i}.${ext}`), Buffer.from(d.split(",")[1] || "", "base64"));
+    });
+  } catch (e) {}
+}
+
+// Cari jawaban captcha: OCR semua varian preprocessing, lalu VOTING — jawaban
+// yang paling sering muncul dari banyak varian dianggap benar. Lebih tahan
+// terhadap salah baca satu varian.
+async function solveCaptcha(page, tag) {
+  const { originals, variants } = await fetchCaptchaVariants(page);
+  if (!variants.length) return { text: "", answer: "" };
+  try {
+    if (!Tesseract) return { text: "", answer: "" };
+    if (!__ocrWorker) {
+      __ocrWorker = await Tesseract.createWorker("eng", 1, { logger: () => {} });
+      try {
+        await __ocrWorker.setParameters({
+          tessedit_char_whitelist: "0123456789+-xX?",
+          tessedit_pageseg_mode: "7",
+        });
+      } catch (e) {}
+    }
+    saveCaptchaDebug(originals, variants, tag);
+    const votes = {};       // answer -> jumlah suara
+    const bestText = {};    // answer -> teks OCR yang menghasilkan
+    const used = [];
+    for (const v of variants) {
+      const buf = Buffer.from(v.split(",")[1] || "", "base64");
+      if (!buf.length) continue;
+      const text = await ocrBuffer(buf);
+      const ans = solveMathCaptcha(text);
+      if (!ans) continue;
+      votes[ans] = (votes[ans] || 0) + 1;
+      if (!bestText[ans]) bestText[ans] = text;
+      used.push({ text, ans });
+    }
+    // Debug OCR lengkap → warkrs-debug-captcha.txt
+    try {
+      fs.writeFileSync(
+        path.join(DIR, "warkrs-debug-captcha.txt"),
+        used.map((u) => `"${u.text}" → ${u.ans}`).join("\n") || "(tidak ada pola terbaca)"
+      );
+    } catch (e) {}
+
+    // Pilih jawaban dengan suara terbanyak (voting)
+    let bestAns = "";
+    let bestVotes = 0;
+    for (const [ans, n] of Object.entries(votes)) {
+      if (n > bestVotes) { bestVotes = n; bestAns = ans; }
+    }
+    return { text: bestText[bestAns] || "", answer: bestAns };
+  } catch (e) {
+    return { text: "", answer: "" };
+  }
+}
+
+// Parse teks OCR "8+7=?" / "12 x 5" / "9 ÷ 3" → hasil hitung (string).
+// Hapus "?"/"=" (sering terbaca jadi digit) lalu ambil pola angka op angka.
+function solveMathCaptcha(text) {
+  const t = String(text || "")
+    .replace(/[^0-9+\-x×X*÷/]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  // Cari SEMUA pola "angka op angka" (2 digit maks). Non-greedy pada angka
+  // kedua supaya "6+77" dibaca "6+7" (bukan "6+77") — digit duplikat dari
+  // "?" tidak ikut. Ambil kandidat dengan operand paling kecil (paling kredibel).
+  let best = "";
+  let bestScore = Infinity;
+  const re = /(\d{1,2}?)\s*([+\-x×X*÷/])\s*(\d{1,2}?)/g;
+  let m;
+  while ((m = re.exec(t)) !== null) {
+    const a = parseInt(m[1], 10);
+    const b = parseInt(m[3], 10);
+    const op = m[2];
+    let r = null;
+    if (op === "+") r = a + b;
+    else if (op === "-") r = a - b;
+    else if (/[x×X*]/.test(op)) r = a * b;
+    else if (/[÷/]/.test(op) && b !== 0) r = Math.round(a / b);
+    if (r === null || r < -50 || r > 99) continue; // hasil wajar captcha sederhana
+    const score = Math.max(a, b); // angka kecil lebih kredibel
+    if (score < bestScore) { bestScore = score; best = String(r); }
+    re.lastIndex = m.index + 1; // lanjut cari dari posisi berikutnya
+  }
+  return best;
+}
+
+// Isi form login (username, password, captcha) lalu submit. Kembalikan true
+// bila berhasil login, false bila masih di halaman login.
+async function fillAndSubmitLogin(page, user, pass, captchaAnswer) {
+  const filled = await page
+    .evaluate(
+      (u, p, cap) => {
+        const pw = document.querySelector('input[type="password"]');
+        if (!pw) return false;
+        const form = pw.closest("form") || document;
+        const setVal = (el, v) => {
+          const proto = el.tagName === "INPUT" ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, "value") && Object.getOwnPropertyDescriptor(proto, "value").set;
+          if (setter) setter.call(el, v);
+          else el.value = v;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+        const usrSel = [
+          'input[name="email"]',
+          'input[name="username"]',
+          'input[name="user"]',
+          'input[name="login"]',
+          'input[type="email"]',
+          'input[name="nim"]',
+          'input[name="no_mhs"]',
+          'input[name="no_mahasiswa"]',
+          'input[type="text"]',
+        ];
+        let usr = null;
+        for (const sel of usrSel) {
+          const el = form.querySelector(sel);
+          if (el && el !== pw && !/captcha|kode|verifikasi/i.test((el.name || "") + (el.id || "") + (el.placeholder || ""))) {
+            usr = el;
+            break;
+          }
+        }
+        if (!usr) return false;
+        setVal(usr, u);
+        setVal(pw, p);
+        if (cap) {
+          const capSel = [
+            'input[name*="captcha" i]',
+            'input[name*="kode" i]',
+            'input[name*="code" i]',
+            'input[name*="jawaban" i]',
+            'input[name*="answer" i]',
+            'input[placeholder*="captcha" i]',
+            'input[placeholder*="kode" i]',
+            'input[placeholder*="jawaban" i]',
+          ];
+          let capInp = null;
+          for (const sel of capSel) {
+            capInp = form.querySelector(sel);
+            if (capInp) break;
+          }
+          if (!capInp) {
+            capInp = Array.from(form.querySelectorAll('input[type="text"], input:not([type])')).find(
+              (el) => el !== usr && el !== pw && !el.value
+            );
+          }
+          if (capInp) setVal(capInp, cap);
+        }
+        return true;
+      },
+      user,
+      pass,
+      captchaAnswer
+    )
+    .catch(() => false);
+  if (!filled) return false;
+
+  const clicked = await page
+    .evaluate(() => {
+      const btn =
+        document.querySelector('button[type="submit"], input[type="submit"]') ||
+        Array.from(document.querySelectorAll("button, .btn, input[type=button]")).find((b) =>
+          /login|masuk|sign\s*in/i.test(b.textContent || b.value || "")
+        );
+      if (btn) { btn.click(); return true; }
+      const form = document.querySelector('form');
+      if (form && typeof form.submit === "function") { form.submit(); return true; }
+      return false;
+    })
+    .catch(() => false);
+
+  const start = Date.now();
+  while (Date.now() - start < 30000) {
+    if (await isLoggedIn(page)) return true;
+    if (!(await page.evaluate(() => !!document.querySelector('input[type="password"]')).catch(() => true))) return true;
+    await sleep(1500);
+  }
+  return clicked;
+}
+
+// Landing page SIAKAD setelah lolos Turnstile masih butuh klik tombol
+// "Masuk"/"Login" sebelum masuk halaman login SSO. Fungsi ini mengekliknya.
+async function clickMasuk(page) {
+  const start = Date.now();
+  while (Date.now() - start < 20000) {
+    const u = safeUrl(page);
+    if (/user\/signin|\/login/i.test(u)) return true;            // sudah di halaman login
+    if (await isLoggedIn(page)) return true;                     // ternyata sudah login
+
+    const clicked = await page
+      .evaluate(() => {
+        const btns = Array.from(
+          document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"]')
+        );
+        const pick = btns.find((b) => {
+          const t = (b.textContent || b.value || b.title || "").toLowerCase();
+          return /masuk|sign\s*in|login|log\s*in|masuk\s+akun/i.test(t);
+        });
+        if (pick) { pick.click(); return true; }
+        return false;
+      })
+      .catch(() => false);
+    if (clicked) {
+      await sleep(1500);
+      continue;
+    }
+    await sleep(800);
+  }
+  return /user\/signin|\/login/i.test(safeUrl(page));
+}
+
+// `page.url()` Puppeteer sinkron (bukan Promise) — bungkus biar aman dipakai
+// dengan `.catch`. Kembalikan string kosong bila gagal.
+function safeUrl(page) {
+  try { return page.url() || ""; } catch (e) { return ""; }
+}
+
+// Login ulang OTOMATIS memakai kredensial tersimpan (SIAKAD_USERNAME/PASSWORD).
+// Isi form login (termasuk captcha matematika bila ada), submit, tunggu login.
+// Coba beberapa kali: captcha bisa berubah setiap submit yang gagal.
+async function autoLogin(page) {
+  const user = CONFIG.SIAKAD_USERNAME;
+  const pass = CONFIG.SIAKAD_PASSWORD;
+  if (!user || !pass) {
+    log("⚠ [login] SIAKAD_USERNAME/PASSWORD kosong — isi di tab Config dulu.", "warn");
+    return false;
+  }
+
+  // 1) Loloskan Turnstile/Cloudflare challenge dulu.
+  await solveTurnstile(page);
+
+  // 2) Kalau masih di landing page (ada tombol "Masuk"), klik biar lanjut
+  //    ke halaman login SSO.
+  const masukOk = await clickMasuk(page);
+  if (!masukOk) {
+    log(`⚠ [login] Tidak bisa menuju halaman login (URL: ${safeUrl(page)}).`, "warn");
+  }
+
+  // 3) Tunggu form login benar-benar siap.
+  const formReady = await page
+    .waitForFunction(() => !!document.querySelector('input[type="password"]'), { timeout: 20000, polling: 500 })
+    .then(() => true)
+    .catch(() => false);
+
+  if (!formReady) {
+    log(`⚠ [login] Form login tidak muncul dalam 20s (URL: ${safeUrl(page)}) — lewati auto-login.`, "warn");
+    return false;
+  }
+
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    if (await isLoggedIn(page)) return true;
+
+    let captchaAnswer = "";
+    const hasCaptchaImg = await page
+      .evaluate(() => !!document.querySelector('img[src*="cpch"], img[src*="captcha"], img[alt*="captcha" i]'))
+      .catch(() => false);
+
+    if (hasCaptchaImg) {
+      const { text, answer } = await solveCaptcha(page, "login-" + attempt);
+      captchaAnswer = answer;
+      if (!captchaAnswer) {
+        log(`🧩 [login] Captcha belum terbaca (OCR: "${text}") — coba ulang ${attempt}/5...`, "warn");
+        await sleep(1200);
+        continue;
+      }
+      log(`🧩 [login] Captcha terdeteksi → "${text}" → jawab ${captchaAnswer}.`, "info");
+    }
+
+    const ok = await fillAndSubmitLogin(page, user, pass, captchaAnswer);
+    if (ok) return true;
+    log(`⚠ [login] Login gagal (percobaan ${attempt}/5) — captcha/field mungkin berubah.`, "warn");
+    await sleep(1500);
+  }
+  return false;
+}
 // ─── CORE WAR ENGINE ────────────────────────────────────────────────────────
 async function spamCourse(page, course, reloadCounter) {
   const label = courseLabel(course);
@@ -782,10 +1251,12 @@ async function spamCourse(page, course, reloadCounter) {
       } catch (e) {
         if (e.code === "SESSION_EXPIRED") throw e;
         if (e.code === "SECURITY") {
-          course.log = `#${attempt}: Cloudflare, cooldown ${CONFIG.SECURITY_COOLDOWN_MS / 1000}s`;
-          log(`🛡 [${label}] Cloudflare challenge. Cooldown ${CONFIG.SECURITY_COOLDOWN_MS / 1000}s...`, "error");
+          securityStrike++;
+          const cool = securityCooldownMs();
+          course.log = `#${attempt}: Cloudflare, cooldown ${cool / 1000}s`;
+          log(`🛡 [${label}] Cloudflare challenge. Cooldown ${cool / 1000}s...`, "error");
           persist();
-          await sleepAbortable(CONFIG.SECURITY_COOLDOWN_MS);
+          await sleepAbortable(cool);
           continue;
         }
         course.log = `#${attempt}: ${e.message}`;
@@ -796,6 +1267,32 @@ async function spamCourse(page, course, reloadCounter) {
       }
     }
     reloadCounter.c++;
+
+    // Cek challenge Cloudflare/Turnstile di halaman SEBELUM kirim request.
+    // Kalau halaman sedang menampilkan "Pemeriksaan Keamanan" / iframe Turnstile,
+    // selesaikan dulu — kalau tidak, semua POST hanya akan kena challenge.
+    try {
+      const hasCf = await page
+        .evaluate(() => {
+          const b = document.body;
+          const txt = (b ? b.innerText || "" : "") + " " + (document.title || "");
+          const textChk = /Pemeriksaan Keamanan|Memverifikasi Browser|Memeriksa Keamanan Browser|checking your browser|verify you are human|just a moment/i.test(txt);
+          const iframeChk = !!document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]');
+          return textChk || iframeChk;
+        })
+        .catch(() => false);
+      if (hasCf) {
+        securityStrike++;
+        log(`🛡 [${label}] Cloudflare di halaman — menyelesaikan challenge...`, "error");
+        const okCf = await solveTurnstile(page);
+        if (!okCf) {
+          await waitOutChallenge(page);
+          await solveTurnstile(page);
+        }
+        await sleep(1500);
+        continue;
+      }
+    } catch (e) {}
 
     try {
       const result = await enrollCourse(page, course);
@@ -813,6 +1310,7 @@ async function spamCourse(page, course, reloadCounter) {
         await sendTelegram(`✅ <b>${label}</b> berhasil didaftarkan! (percobaan #${attempt})`);
         persist();
         reloadCounter.c = 0;
+        securityStrike = 0;
         return true;
       }
       if (result.permanent) {
@@ -827,16 +1325,34 @@ async function spamCourse(page, course, reloadCounter) {
         return false;
       }
       if (result.security) {
+        securityStrike++;
+        const cool = securityCooldownMs();
+        // Diagnosa: apa isi response Cloudflare yang sebenarnya?
+        try {
+          const raw = String(result.rawText || "");
+          const title = (raw.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || "";
+          const snippet = raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 160);
+          const isTurnstile = /turnstile|cf-chl|challenge-platform/.test(raw);
+          log(`🛡 [${label}] Kena Cloudflare HTTP ${result.status} | title="${title}" | turnstile=${isTurnstile} | "${snippet}"`, "error");
+        } catch (e) {}
         course.log = `#${attempt}: kena Cloudflare, reload + cooldown`;
         clearStatus();
-        log(`🛡 [${label}] Kena Cloudflare. Cooldown ${CONFIG.SECURITY_COOLDOWN_MS / 1000}s...`, "error");
+        log(`🛡 [${label}] Kena Cloudflare. Cooldown ${cool / 1000}s...`, "error");
         persist();
-        await sendTelegram(`🛡 <b>${label}</b> kena rate-limit/Cloudflare. Cooldown ${CONFIG.SECURITY_COOLDOWN_MS / 1000}s.`);
+        await sendTelegram(`🛡 <b>${label}</b> kena rate-limit/Cloudflare. Cooldown ${cool / 1000}s.`);
         reloadCounter.c = 0;
-        await sleepAbortable(CONFIG.SECURITY_COOLDOWN_MS);
+        // Reload halaman & klik Turnstile bila muncul — jangan hanya menunggu.
+        try {
+          await page.goto(CONFIG.BASE_URL + CONFIG.KRS_PAGE, { waitUntil: "domcontentloaded", timeout: CONFIG.HTTP_TIMEOUT_MS });
+        } catch (e) {}
+        await waitOutChallenge(page);
+        await solveTurnstile(page);
+        await sleepAbortable(cool);
         continue;
       }
 
+      // Respons normal (bukan Cloudflare/403) → jaringan sehat, reset hitungan.
+      securityStrike = 0;
       course.log = `#${attempt}: ${result.message}`;
       renderStatus(`${label} · coba #${attempt} · ${shortMessage(result.message)}`);
 
@@ -875,15 +1391,28 @@ async function spamCourse(page, course, reloadCounter) {
 
 // Tunggu login ulang di jendela browser saat sesi kedaluwarsa di tengah war.
 async function recoverSession(page) {
-  log("🔒 SESI LOGIN KEDALUWARSA — login di jendela browser otomatis (maks 10 menit)...", "error");
-  await sendTelegram("🔒 Sesi SIAKAD kedaluwarsa — tunggu login ulang di jendela browser.");
+  log("🔒 SESI LOGIN KEDALUWARSA — mencoba login ulang otomatis...", "error");
+  await sendTelegram("🔒 Sesi SIAKAD kedaluwarsa — mencoba login otomatis.");
   try {
     await page.goto(CONFIG.BASE_URL, { waitUntil: "domcontentloaded", timeout: CONFIG.HTTP_TIMEOUT_MS });
   } catch (e) {}
   const ok = await waitOutChallenge(page);
   if (!ok) return false;
-  const loggedIn = await waitForLogin(page);
-  if (!loggedIn) return false;
+
+  // Loloskan Turnstile checkbox (kalau ada) di halaman login SSO.
+  await solveTurnstile(page);
+
+  if (!(await isLoggedIn(page))) {
+    const autoOk = await autoLogin(page);
+    if (autoOk) {
+      log("✅ Login otomatis berhasil.", "success");
+    } else {
+      log("⚠ Login otomatis gagal — login MANUAL di jendela browser (maks 10 menit)...", "warn");
+      await sendTelegram("⚠ Login otomatis gagal — login manual di jendela browser.");
+      const loggedIn = await waitForLogin(page);
+      if (!loggedIn) return false;
+    }
+  }
   try {
     await ensureKrsPage(page);
   } catch (e) {
@@ -891,6 +1420,7 @@ async function recoverSession(page) {
   }
   log("✅ Berhasil login ulang — WAR dilanjutkan!", "success");
   await sendTelegram("✅ Login ulang berhasil — WAR lanjut.");
+  securityStrike = 0;
   return true;
 }
 
@@ -1089,6 +1619,11 @@ async function cmdLogin() {
     await waitOutChallenge(page, 90000);
     if (await isLoggedIn(page)) {
       log("✅ Kamu sudah login (sesi tersimpan dari run sebelumnya).", "success");
+      return;
+    }
+    await solveTurnstile(page);
+    if (await autoLogin(page)) {
+      log("✅ Login otomatis berhasil memakai kredensial tersimpan.", "success");
       return;
     }
     log("👤 Silakan LOGIN di jendela browser. Menunggu sampai login terdeteksi...", "info");
@@ -1790,15 +2325,23 @@ async function cmdPanel() {
     await ensureKrsPage(page);
   } catch (e) {
     if (e.code === "SESSION_EXPIRED") {
-      log("🔒 Belum login — login di TAB SIAKAD (panel ada di tab sebelah).", "warn");
+      log("🔒 Belum login — mencoba login otomatis...", "warn");
       try { await page.goto(CONFIG.BASE_URL, { waitUntil: "domcontentloaded", timeout: CONFIG.HTTP_TIMEOUT_MS }); } catch (e2) {}
       await waitOutChallenge(page);
-      waitForLogin(page).then(async (ok) => {
-        if (ok) {
-          log("✅ Login terdeteksi — membuka halaman KRS.", "success");
-          try { await ensureKrsPage(page); } catch (e3) { log("⚠ Gagal buka KRS: " + e3.message, "warn"); }
-        }
-      });
+      await solveTurnstile(page);
+      const autoOk = await autoLogin(page);
+      if (autoOk) {
+        log("✅ Login otomatis berhasil — membuka halaman KRS.", "success");
+        try { await ensureKrsPage(page); } catch (e3) { log("⚠ Gagal buka KRS: " + e3.message, "warn"); }
+      } else {
+        log("⚠ Login otomatis gagal/absen kredensial — login di TAB SIAKAD (panel ada di tab sebelah).", "warn");
+        waitForLogin(page).then(async (ok) => {
+          if (ok) {
+            log("✅ Login terdeteksi — membuka halaman KRS.", "success");
+            try { await ensureKrsPage(page); } catch (e3) { log("⚠ Gagal buka KRS: " + e3.message, "warn"); }
+          }
+        });
+      }
     } else if (e.code === "SECURITY") {
       log("🛡 Cloudflare challenge tidak lolos — cek jendela browser.", "error");
     } else {

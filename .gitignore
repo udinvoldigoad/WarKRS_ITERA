@@ -7,6 +7,9 @@ warkrs-config.json
 warkrs-state.json
 warkrs-debug.txt
 
+# Konfigurasi opencode (berisi API key MCP)
+opencode.json
+
 # ── Dependensi & file sistem ───────────────────────────────────────
 node_modules/
 *.log
@@ -17,3 +20,7 @@ Thumbs.db
 _*.js
 _*.json
 _tmp/
+
+captcha-debug/
+eng.traineddata
+

@@ -4,155 +4,196 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>WAR KRS Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg:        #0e1311;
-    --panel:     #131917;
-    --panel2:    #18201c;
-    --panel3:    #1e2823;
-    --border:    #27322c;
-    --border2:   #35423a;
-    --text:      #ecefea;
-    --muted:     #87948c;
-    --accent:    #58b98a;
-    --accent2:   #6cc99c;
-    --accent-dim:#1e3a2c;
-    --success:   #6fbf9a;
-    --warn:      #c2a06a;
-    --error:     #d3918e;
-    --info:      #8fb4c4;
-    --radius:    6px;
+    --bg:        #0f172a;
+    --bg-2:      #020617;
+    --surface:   #1e293b;
+    --surface-2: #334155;
+    --surface-3: #475569;
+    --surface-hi:#222a3d;
+    --border:    #334155;
+    --border-2:  #3c4a42;
+    --text:      #f8fafc;
+    --muted:     #94a3b8;
+    --accent:    #10b981;
+    --accent-2:  #4edea3;
+    --accent-dim:#0a3d2c;
+    --success:   #4edea3;
+    --warn:      #f59e0b;
+    --error:     #ef4444;
+    --info:      #38bdf8;
+    --radius:    12px;
+    --radius-sm: 6px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
     height: 100vh; overflow: hidden;
     display: flex; flex-direction: column;
-    font-size: 13px;
-    line-height: 1.45;
+    font-size: 14px;
+    line-height: 1.5;
+    background-image:
+      radial-gradient(1000px 400px at 90% -10%, rgba(16,185,129,.06), transparent),
+      radial-gradient(800px 300px at -10% 0%, rgba(56,189,248,.05), transparent);
   }
 
-  /* ── Header ── */
+  /* ── Header (glassmorphism) ── */
   .hdr {
-    display: flex; align-items: center; gap: 12px;
-    padding: 13px 18px;
-    background: var(--panel);
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 24px;
+    height: 64px;
+    background: rgba(15,23,42,.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+    position: relative; z-index: 20;
   }
-  .hdr .logo { font-family: Georgia, "Times New Roman", serif; font-size: 16px; font-weight: 600;
-    letter-spacing: .04em; color: var(--text); }
-  .hdr .logo .mk { color: var(--accent); }
-  .hdr .badge { font-size: 9px; padding: 2px 8px; border-radius: 2px;
-    color: var(--muted); border: 1px solid var(--border2);
-    text-transform: uppercase; letter-spacing: .14em; }
+  .hdr .logo { font-size: 20px; font-weight: 800; letter-spacing: -.02em; color: var(--text); }
+  .hdr .logo .mk { color: var(--accent-2); }
+  .hdr .badge { font-size: 11px; padding: 3px 10px; border-radius: var(--radius-sm);
+    color: var(--muted); border: 1px solid var(--border);
+    text-transform: uppercase; letter-spacing: .14em; font-weight: 600; }
   .hdr .spacer { flex: 1; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); transition: background .3s; }
-  .dot.idle { background: var(--success); }
-  .dot.work { background: var(--warn); }
-  .dot.war  { background: var(--error); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted);
+    transition: background .3s, box-shadow .3s; }
+  .dot.idle { background: var(--success); box-shadow: 0 0 0 3px rgba(78,222,163,.15); }
+  .dot.work { background: var(--warn); box-shadow: 0 0 0 3px rgba(245,158,11,.15); }
+  .dot.war  { background: var(--error); box-shadow: 0 0 0 3px rgba(239,68,68,.18); }
 
   /* ── Tabs ── */
-  .tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--panel); }
-  .tab { flex: 1; padding: 10px 4px; border: none; background: none; color: var(--muted);
-    cursor: pointer; font-size: 11px; font-weight: 600; letter-spacing: .03em;
+  .tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    background: rgba(15,23,42,.8); backdrop-filter: blur(12px); position: relative; z-index: 10; }
+  .tab { flex: 1; padding: 13px 4px; border: none; background: none; color: var(--muted);
+    cursor: pointer; font-size: 12px; font-weight: 600; letter-spacing: .05em;
+    text-transform: uppercase;
     border-bottom: 2px solid transparent; transition: color .15s, background .15s; }
-  .tab:hover { color: var(--text); background: var(--panel3); }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: var(--panel2); }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent-2); border-bottom-color: var(--accent); }
 
   /* ── Hint bar ── */
-  .hint { padding: 7px 16px; font-size: 10.5px; color: var(--muted);
-    background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
-  .hint b { color: var(--accent); font-weight: 600; }
+  .hint { padding: 9px 24px; font-size: 12px; color: var(--muted); flex-shrink: 0; }
+  .hint b { color: var(--accent-2); font-weight: 600; }
 
   /* ── Body ── */
-  .body { flex: 1; overflow-y: auto; padding: 14px; scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+  .body { flex: 1; overflow-y: auto; padding: 24px 24px 140px;
+    max-width: 1200px; width: 100%; margin: 0 auto;
+    scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .sec { display: none; }
-  .sec.active { display: block; }
+  .sec.active { display: block; animation: fadein .15s ease; }
+  @keyframes fadein { from { opacity: 0 } to { opacity: 1 } }
 
-  .label { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase;
-    letter-spacing: .1em; margin: 14px 0 6px; }
+  .label { display: block; color: var(--muted); font-size: 12px; text-transform: uppercase;
+    letter-spacing: .08em; margin: 20px 0 8px; font-weight: 600; }
   .label:first-child { margin-top: 0; }
 
   .inp, .txt, select.inp {
-    width: 100%; background: var(--bg); border: 1px solid var(--border);
-    border-radius: var(--radius); color: var(--text); padding: 8px 10px;
-    font-size: 12px; outline: none; transition: border-color .15s; font-family: inherit;
+    width: 100%; background: var(--bg-2); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text); padding: 11px 14px;
+    font-size: 13px; outline: none; transition: border-color .15s, box-shadow .15s; font-family: inherit;
   }
-  .inp:focus, .txt:focus { border-color: var(--accent); }
-  .txt { resize: vertical; min-height: 64px; line-height: 1.5; margin-bottom: 8px; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
-  .row { display: flex; gap: 8px; }
+  .inp:focus, .txt:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(16,185,129,.15); }
+  .inp::placeholder, .txt::placeholder { color: rgba(148,163,184,.5); }
+  .txt { resize: vertical; min-height: 64px; line-height: 1.5; margin-bottom: 8px;
+    font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 12px; }
+  .row { display: flex; gap: 10px; }
   .row > * { flex: 1; }
 
   .btn { border: 1px solid transparent; border-radius: var(--radius); cursor: pointer;
-    padding: 9px 12px; font-size: 12px; font-weight: 600; letter-spacing: .02em;
-    transition: background .15s, color .15s, border-color .15s; width: 100%; font-family: inherit; }
+    padding: 11px 14px; font-size: 12px; font-weight: 600; letter-spacing: .03em;
+    transition: background .15s, color .15s, border-color .15s, transform .05s; width: 100%;
+    font-family: inherit; text-transform: uppercase; letter-spacing: .04em; }
   .btn:disabled { opacity: .45; cursor: not-allowed; }
-  .btn-primary { background: var(--accent); color: #0a120e; }
-  .btn-primary:hover:not(:disabled) { background: var(--accent2); }
-  .btn-danger { background: transparent; color: var(--error); border-color: var(--border2); }
-  .btn-danger:hover:not(:disabled) { border-color: var(--error); background: rgba(211,145,142,.07); }
-  .btn-ghost { background: var(--panel2); color: var(--text); border-color: var(--border); }
-  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
-  .btn-green { background: var(--accent); color: #0a120e; }
-  .btn-green:hover:not(:disabled) { background: var(--accent2); }
-  .btn-sm { padding: 6px 10px; font-size: 11px; width: auto; border-radius: var(--radius); }
+  .btn:active:not(:disabled) { transform: scale(.99); }
+  .btn-primary { background: var(--accent); color: #052e21; }
+  .btn-primary:hover:not(:disabled) { background: var(--accent-2); }
+  .btn-danger { background: transparent; color: var(--error); border-color: var(--border); }
+  .btn-danger:hover:not(:disabled) { border-color: var(--error); background: rgba(239,68,68,.07); }
+  .btn-ghost { background: var(--surface); color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent-2); }
+  .btn-green { background: var(--accent); color: #052e21; }
+  .btn-green:hover:not(:disabled) { background: var(--accent-2); }
+  .btn-sm { padding: 8px 14px; font-size: 11px; width: auto; border-radius: var(--radius); }
 
   /* ── Card status ── */
-  .card { background: var(--panel2); border: 1px solid var(--border);
-    border-top: 1px solid var(--border2);
-    border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px; }
-  .card .big { font-size: 22px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
-  .card .sub { color: var(--muted); font-size: 11px; margin-top: 1px; }
-  .progbar { height: 5px; border-radius: 2px; background: var(--panel3); overflow: hidden; margin-top: 10px; }
-  .progbar > i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+  .card { background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px 22px; margin-bottom: 16px;
+    position: relative; overflow: hidden; }
+  .card::before { content: ""; position: absolute; inset: 0;
+    background: linear-gradient(100deg, rgba(16,185,129,.05), transparent 55%);
+    pointer-events: none; }
+  .card .big { font-size: 34px; font-weight: 800; color: var(--accent-2);
+    font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .card .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .progbar { height: 6px; border-radius: 3px; background: var(--bg-2); overflow: hidden; margin-top: 14px; }
+  .progbar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    transition: width .4s; }
 
   /* ── Daftar kelas (cari + tambah) ── */
-  .slist { display: flex; flex-direction: column; gap: 4px; max-height: 230px; overflow-y: auto; margin-top: 8px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; }
-  .sitem { display: flex; align-items: center; gap: 8px; background: var(--panel2);
-    border: 1px solid transparent; border-radius: 4px; padding: 5px 8px; font-size: 11px; }
-  .sitem:hover { border-color: var(--border2); }
-  .sitem .lb { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sitem .ik { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
-  .sitem button { background: var(--panel3); color: var(--accent); border: 1px solid var(--border2);
-    cursor: pointer; font-size: 12px; width: 22px; height: 22px; line-height: 1; border-radius: 4px; font-weight: 700; flex-shrink: 0; }
-  .sitem button:hover:not(:disabled) { background: var(--accent); color: #0a120e; border-color: var(--accent); }
-  .sitem button:disabled { color: var(--muted); opacity: .4; cursor: default; }
+  .slist { display: flex; flex-direction: column; max-height: 300px; overflow-y: auto; margin-top: 10px;
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); overflow-x: hidden; }
+  .sitem { display: flex; align-items: center; gap: 10px; background: transparent;
+    border-bottom: 1px solid rgba(51,65,85,.5); padding: 9px 12px; font-size: 13px; transition: background .12s; }
+  .sitem:last-child { border-bottom: none; }
+  .sitem:hover { background: rgba(34,42,61,.6); }
+  .sitem .lb { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; }
+  .sitem .ik { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums;
+    font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .sitem button { background: var(--surface); color: var(--accent-2); border: 1px solid var(--border);
+    cursor: pointer; font-size: 16px; width: 26px; height: 26px; line-height: 1; border-radius: var(--radius-sm);
+    font-weight: 700; flex-shrink: 0; transition: all .12s; }
+  .sitem button:hover:not(:disabled) { background: var(--accent); color: #052e21; border-color: var(--accent); }
+  .sitem button:disabled { color: var(--muted); opacity: .35; cursor: default; }
 
   /* ── Daftar target ── */
-  .clist { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
-  .citem { background: var(--panel2); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 9px 11px; display: flex; align-items: center; gap: 10px; }
+  .clist { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+  .citem { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 14px; display: flex; align-items: center; gap: 12px; transition: border-color .15s; }
+  .citem:hover { border-color: rgba(16,185,129,.3); }
   .citem .info { flex: 1; min-width: 0; }
-  .citem .nm { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .citem .id { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
-  .citem .lg { font-size: 10px; color: var(--warn); margin-top: 2px; word-break: break-word; }
-  .st { font-size: 9px; padding: 2px 8px; border-radius: 3px; font-weight: 600;
-    letter-spacing: .06em; white-space: nowrap; flex-shrink: 0; border: 1px solid transparent; }
-  .st.antri    { color: var(--muted);   border-color: rgba(135,148,140,.25); background: rgba(135,148,140,.08); }
-  .st.proses   { color: var(--info);    border-color: rgba(143,180,196,.3);  background: rgba(143,180,196,.08); }
-  .st.berhasil { color: var(--success); border-color: rgba(111,191,154,.3);  background: rgba(111,191,154,.08); }
-  .st.gagal    { color: var(--error);   border-color: rgba(211,145,142,.3);  background: rgba(211,145,142,.08); }
-  .del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px;
-    padding: 1px 5px; border-radius: 3px; flex-shrink: 0; }
-  .del:hover { color: var(--error); background: var(--panel3); }
+  .citem .nm { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .citem .nm .kl { color: var(--muted); font-weight: 400; }
+  .citem .id { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums;
+    font-family: "JetBrains Mono", ui-monospace, monospace; margin-top: 1px; }
+  .citem .lg { font-size: 11px; color: var(--warn); margin-top: 3px; word-break: break-word;
+    font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .st { font-size: 10px; padding: 3px 12px; border-radius: var(--radius-sm); font-weight: 600;
+    letter-spacing: .08em; white-space: nowrap; flex-shrink: 0; border: 1px solid transparent;
+    text-transform: uppercase; }
+  .st.antri    { color: var(--muted);  border-color: rgba(148,163,184,.3);  background: rgba(148,163,184,.08); }
+  .st.proses   { color: var(--info);   border-color: rgba(56,189,248,.35);  background: rgba(56,189,248,.08); }
+  .st.berhasil { color: var(--success); border-color: rgba(78,222,163,.35); background: rgba(78,222,163,.08); }
+  .st.gagal    { color: var(--error);  border-color: rgba(239,68,68,.35);   background: rgba(239,68,68,.08); }
+  .del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px;
+    padding: 2px 7px; border-radius: var(--radius-sm); flex-shrink: 0; transition: all .12s; }
+  .del:hover { color: var(--error); background: rgba(239,68,68,.1); }
 
   /* ── Config ── */
-  .cfg { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .cfg .cl { font-size: 12px; }
-  .cfg .cs { color: var(--muted); font-size: 10px; }
-  .cfg input { width: 80px; text-align: right; background: var(--bg); border: 1px solid var(--border);
-    color: var(--text); border-radius: var(--radius); padding: 6px 8px; font-size: 12px; }
-  .cfg input:focus { border-color: var(--accent); outline: none; }
-  .check { display: flex; align-items: center; gap: 8px; color: var(--text); cursor: pointer; margin-bottom: 8px; }
+  .cfg { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 14px; }
+  .cfg .cl { font-size: 13px; font-weight: 500; }
+  .cfg .cs { color: var(--muted); font-size: 11px; }
+  .cfg input { width: 90px; text-align: right; background: var(--bg-2); border: 1px solid var(--border);
+    color: var(--text); border-radius: var(--radius); padding: 8px 10px; font-size: 13px;
+    font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .cfg input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(16,185,129,.15); }
+  .check { display: flex; align-items: center; gap: 10px; color: var(--text); cursor: pointer; margin-bottom: 10px; font-size: 13px; }
   .check input { accent-color: var(--accent); width: auto; }
 
   /* ── Log ── */
-  .log { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; line-height: 1.6; }
-  .lrow { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+  .log { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 11.5px; line-height: 1.7;
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; max-height: 70vh; overflow-y: auto; }
+  .lrow { display: flex; gap: 12px; padding: 3px 0; border-bottom: 1px solid rgba(51,65,85,.4); }
+  .lrow:last-child { border-bottom: none; }
   .lrow .t { color: var(--muted); flex-shrink: 0; font-variant-numeric: tabular-nums; }
   .lrow.success .m { color: var(--success); }
   .lrow.error .m { color: var(--error); }
@@ -160,29 +201,39 @@
   .lrow.info .m { color: var(--info); }
 
   /* ── Modal ── */
-  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none;
+  .modal-bg { position: fixed; inset: 0; background: rgba(2,6,23,.7);
+    backdrop-filter: blur(6px); display: none;
     align-items: center; justify-content: center; z-index: 50; }
   .modal-bg.show { display: flex; }
-  .modal { background: var(--panel); border: 1px solid var(--border2); border-radius: var(--radius);
-    padding: 16px; width: 92%; max-height: 80vh; overflow-y: auto; }
-  .modal h3 { font-size: 13px; margin-bottom: 10px; color: var(--text); }
-  .mopt { display: block; width: 100%; text-align: left; background: var(--panel2);
+  .modal { background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; width: 92%; max-width: 480px; max-height: 80vh; overflow-y: auto; }
+  .modal h3 { font-size: 14px; margin-bottom: 14px; color: var(--text); }
+  .mopt { display: block; width: 100%; text-align: left; background: var(--bg-2);
     border: 1px solid var(--border); color: var(--text); border-radius: var(--radius);
-    padding: 8px 10px; margin-bottom: 6px; cursor: pointer; font-size: 12px; font-family: inherit; }
-  .mopt:hover { border-color: var(--accent); color: var(--accent); }
+    padding: 11px 14px; margin-bottom: 8px; cursor: pointer; font-size: 13px; font-family: inherit; }
+  .mopt:hover { border-color: var(--accent); color: var(--accent-2); }
 
-  .empty { color: var(--muted); text-align: center; padding: 18px 0; font-size: 11px; }
-  .notice { color: var(--info); font-size: 11px; margin-top: 6px; line-height: 1.5; }
+  .empty { color: var(--muted); text-align: center; padding: 24px 0; font-size: 12px; }
+  .notice { color: var(--info); font-size: 12px; margin-top: 8px; line-height: 1.5; }
 
-  details summary { color: var(--muted); font-size: 11px; cursor: pointer; text-transform: uppercase;
-    letter-spacing: .1em; user-select: none; }
-  details summary:hover { color: var(--accent); }
+  details summary { color: var(--muted); font-size: 12px; cursor: pointer; text-transform: uppercase;
+    letter-spacing: .08em; user-select: none; font-weight: 600; }
+  details summary:hover { color: var(--accent-2); }
 
-  ::selection { background: rgba(88,185,138,.28); color: var(--text); }
+  ::selection { background: rgba(16,185,129,.28); color: var(--text); }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
-  ::-webkit-scrollbar-thumb:hover { background: #44574c; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--surface-3); }
   ::-webkit-scrollbar-track { background: transparent; }
+
+  /* ── Footer action bar (fixed) ── */
+  .footerbar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
+    background: rgba(15,23,42,.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex; justify-content: center; }
+  .footerbar .inner { width: 100%; max-width: 1200px; }
+  .footerbar .btn { padding: 14px; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -213,7 +264,7 @@
             <div class="sub">matkul berhasil terambil</div>
           </div>
           <div style="text-align:right">
-            <div class="big" id="sksTxt" style="font-size:16px">-</div>
+            <div class="big" id="sksTxt" style="font-size:22px">-</div>
             <div class="sub">SKS</div>
           </div>
         </div>
@@ -221,15 +272,15 @@
       </div>
 
       <div class="row" style="margin-bottom:0">
-        <button class="btn btn-primary" id="btnScan" style="flex:0 0 auto;width:auto;padding:9px 16px">Pindai</button>
+        <button class="btn btn-primary" id="btnScan" style="flex:0 0 auto;width:auto;padding:11px 22px">Pindai</button>
         <input class="inp" id="inpFind" placeholder="Cari matkul / kode / kelas…">
       </div>
       <div id="alist" class="slist"><div class="empty">Klik [Pindai] untuk memuat daftar kelas.</div></div>
       <div class="notice" id="scanNote"></div>
 
-      <details style="margin-top:12px">
+      <details style="margin-top:16px">
         <summary>Tambah manual (ketik / paste)</summary>
-        <textarea class="txt" id="inpAdd" style="margin-top:8px" placeholder="Kapita Selekta - RA&#10;Jaringan Komputer - RB&#10;43106"></textarea>
+        <textarea class="txt" id="inpAdd" style="margin-top:10px" placeholder="Kapita Selekta - RA&#10;Jaringan Komputer - RB&#10;43106"></textarea>
         <div class="row">
           <button class="btn btn-primary btn-sm" id="btnAdd">Tambah</button>
           <button class="btn btn-ghost btn-sm" id="btnClear">Bersihkan</button>
@@ -237,12 +288,6 @@
       </details>
 
       <div id="clist" class="clist"><div class="empty">Belum ada target. Pilih dari daftar di atas.</div></div>
-
-      <div style="display:flex;gap:8px;margin-top:14px">
-        <button class="btn btn-green" id="btnWar">MULAI WAR</button>
-        <button class="btn btn-danger" id="btnStop" style="display:none">HENTIKAN</button>
-      </div>
-      <div class="notice" id="warNote"></div>
     </div>
 
     <!-- CONFIG -->
@@ -266,20 +311,33 @@
       <div class="cfg"><div><div class="cl">Cooldown proteksi</div></div><input id="cfgCooldown" type="number"></div>
       <label class="check"><input type="checkbox" id="cfgSks"> Hentikan otomatis saat SKS penuh</label>
 
+      <label class="label">Login SIAKAD otomatis (opsional)</label>
+      <input class="inp" id="cfgUser" placeholder="email SIAKAD" style="margin-bottom:8px">
+      <input class="inp" id="cfgPass" type="password" placeholder="Password SIAKAD" style="margin-bottom:12px">
+
       <label class="label">Notifikasi Telegram (opsional)</label>
-      <input class="inp" id="cfgTgTok" placeholder="Bot Token" style="margin-bottom:6px">
-      <input class="inp" id="cfgTgChat" placeholder="Chat ID" style="margin-bottom:10px">
+      <input class="inp" id="cfgTgTok" placeholder="Bot Token" style="margin-bottom:8px">
+      <input class="inp" id="cfgTgChat" placeholder="Chat ID" style="margin-bottom:12px">
 
       <div class="row">
         <button class="btn btn-primary btn-sm" id="btnCfgSave">Simpan</button>
         <button class="btn btn-ghost btn-sm" id="btnTgTest">Test TG</button>
       </div>
-      <button class="btn btn-danger" id="btnReset" style="margin-top:12px">Reset Semua State</button>
+      <button class="btn btn-danger" id="btnReset" style="margin-top:14px">Reset Semua State</button>
     </div>
 
     <!-- LOG -->
     <div class="sec" id="sec-log">
       <div class="log" id="logBox"><div class="empty">Log kosong.</div></div>
+    </div>
+  </div>
+
+  <!-- Footer action bar -->
+  <div class="footerbar">
+    <div class="inner">
+      <button class="btn btn-green" id="btnWar">MULAI WAR</button>
+      <button class="btn btn-danger" id="btnStop" style="display:none">HENTIKAN</button>
+      <div class="notice" id="warNote" style="text-align:center;margin-top:8px"></div>
     </div>
   </div>
 
@@ -304,6 +362,7 @@ let state = { courses: [], config: {}, warRunning: false, availableLen: 0, lastS
 let lastLog = 0;
 let availCache = [];
 let scanAdded = new Set();
+let cfgDirty = {}; // field config yang sudah diedit user → jangan ditimpa renderConfig
 
 function setDot(mode) {
   const d = $("dot");
@@ -316,6 +375,7 @@ document.querySelectorAll(".tab").forEach((t) => {
     document.querySelectorAll(".sec").forEach((x) => x.classList.remove("active"));
     t.classList.add("active");
     $("sec-" + t.dataset.tab).classList.add("active");
+    if (t.dataset.tab === "config") renderConfig();
   });
 });
 
@@ -336,7 +396,7 @@ function render() {
       .map((c, i) =>
         '<div class="citem">' +
         '<div class="info">' +
-          '<div class="nm">' + esc(c.name) + (c.kelas ? " <span style=\"color:#8aa399\">" + esc(c.kelas) + "</span>" : "") + "</div>" +
+          '<div class="nm">' + esc(c.name) + (c.kelas ? ' <span class="kl">' + esc(c.kelas) + "</span>" : "") + "</div>" +
           '<div class="id">' + esc(c.id) + (c.kode ? " &middot; " + esc(c.kode) : "") + (c.retries ? " &middot; coba " + c.retries : "") + "</div>" +
           (c.log ? '<div class="lg">' + esc(c.log) + "</div>" : "") +
         "</div>" +
@@ -394,16 +454,27 @@ async function loadAvail() {
 
 function renderConfig() {
   const c = state.config || {};
-  if (document.activeElement !== $("cfgRetry")) $("cfgRetry").value = c.RETRY_DELAY_MS || 0;
-  if (document.activeElement !== $("cfgJitter")) $("cfgJitter").value = c.RETRY_JITTER_MS || 0;
-  if (document.activeElement !== $("cfgLimit")) $("cfgLimit").value = c.SPAM_LIMIT || 0;
-  if (document.activeElement !== $("cfgBatch")) $("cfgBatch").value = c.BATCH_DELAY_MS || 0;
-  if (document.activeElement !== $("cfgCooldown")) $("cfgCooldown").value = c.SECURITY_COOLDOWN_MS || 0;
-  $("cfgSks").checked = c.AUTO_STOP_SKS !== false;
-  if (document.activeElement !== $("cfgTgTok")) $("cfgTgTok").value = c.TELEGRAM_BOT_TOKEN || "";
-  if (document.activeElement !== $("cfgTgChat")) $("cfgTgChat").value = c.TELEGRAM_CHAT_ID || "";
-  $("cfgBrowser").value = c.BROWSER || "auto";
+  if (!cfgDirty.cfgRetry)   $("cfgRetry").value = c.RETRY_DELAY_MS || 0;
+  if (!cfgDirty.cfgJitter)  $("cfgJitter").value = c.RETRY_JITTER_MS || 0;
+  if (!cfgDirty.cfgLimit)   $("cfgLimit").value = c.SPAM_LIMIT || 0;
+  if (!cfgDirty.cfgBatch)   $("cfgBatch").value = c.BATCH_DELAY_MS || 0;
+  if (!cfgDirty.cfgCooldown) $("cfgCooldown").value = c.SECURITY_COOLDOWN_MS || 0;
+  if (!cfgDirty.cfgSks)     $("cfgSks").checked = c.AUTO_STOP_SKS !== false;
+  if (!cfgDirty.cfgTgTok)   $("cfgTgTok").value = c.TELEGRAM_BOT_TOKEN || "";
+  if (!cfgDirty.cfgTgChat)  $("cfgTgChat").value = c.TELEGRAM_CHAT_ID || "";
+  if (!cfgDirty.cfgUser)    $("cfgUser").value = c.SIAKAD_USERNAME || "";
+  if (!cfgDirty.cfgPass)    $("cfgPass").value = c.SIAKAD_PASSWORD || "";
+  if (!cfgDirty.cfgBrowser) $("cfgBrowser").value = c.BROWSER || "auto";
 }
+
+// Tandai field sebagai "diedit user" saat diketik/berubah → renderConfig tidak
+// akan menimpa nilainya (fix: isi email hilang saat pindah ke field lain).
+["cfgRetry","cfgJitter","cfgLimit","cfgBatch","cfgCooldown","cfgTgTok","cfgTgChat","cfgUser","cfgPass"].forEach((id) => {
+  $(id).addEventListener("input", () => { cfgDirty[id] = true; });
+});
+["cfgSks","cfgBrowser"].forEach((id) => {
+  $(id).addEventListener("change", () => { cfgDirty[id] = true; });
+});
 
 function renderLogs(rows) {
   if (!rows || !rows.length) return;
@@ -476,13 +547,15 @@ $("btnCfgSave").addEventListener("click", async () => {
     SPAM_LIMIT: +$("cfgLimit").value, BATCH_DELAY_MS: +$("cfgBatch").value,
     SECURITY_COOLDOWN_MS: +$("cfgCooldown").value, AUTO_STOP_SKS: $("cfgSks").checked,
     TELEGRAM_BOT_TOKEN: $("cfgTgTok").value.trim(), TELEGRAM_CHAT_ID: $("cfgTgChat").value.trim(),
+    SIAKAD_USERNAME: $("cfgUser").value.trim(), SIAKAD_PASSWORD: $("cfgPass").value.trim(),
   };
   for (const [k, v] of Object.entries(sets)) await post("config_set", { key: k, value: v });
+  cfgDirty = {};
   refresh();
 });
 $("btnTgTest").addEventListener("click", async () => { await post("tgtest"); refresh(); });
 $("btnReset").addEventListener("click", async () => {
-  if (confirm("Hapus SEMUA state (target, cache, config)?")) { await post("reset"); refresh(); }
+  if (confirm("Hapus SEMUA state (target, cache, config)?")) { cfgDirty = {}; await post("reset"); refresh(); }
 });
 
 let lastStateJson = "";
