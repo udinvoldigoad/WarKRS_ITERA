@@ -37,7 +37,7 @@ const DEFAULT_CONFIG = {
   RETRY_JITTER_MS: 3000,                     // Jitter acak biar tidak terlihat bot (ms)
   SPAM_LIMIT: 0,                             // 0 = spam terus sampai sukses/Ctrl+C
   BATCH_DELAY_MS: 2000,                      // Jeda antar matkul berbeda (ms)
-  SECURITY_COOLDOWN_MS: 60000,               // Cooldown kalau kena challenge (ms)
+  SECURITY_COOLDOWN_MS: 45000,               // Cooldown awal kalau kena challenge (ms)
   RELOAD_EVERY_ATTEMPTS: 15,                 // Reload halaman tiap N percobaan (refresh token)
   HTTP_TIMEOUT_MS: 60000,                    // Timeout halaman (ms)
   SOUND_ON: true,                            // Beep saat berhasil
@@ -119,11 +119,12 @@ let panelPage = null;
 let warActive = false;
 let securityStrike = 0; // jumlah kenangan Cloudflare beruntun → backoff bertahap
 
-// Cooldown Cloudflare naik bertahap tiap kena beruntun (60s → 120s → 240s → …,
-// maks 5 menit). Reset ke nilai dasar setelah satu percobaan sukses/bersih.
+// Cooldown Cloudflare naik bertahap tiap kena beruntun (45s → 90s → 180s → …,
+// maks 5 menit). Strike pertama = cooldown DASAR (bukan 2×), reset ke 0
+// setelah challenge berhasil dilewati atau ada respons normal.
 function securityCooldownMs() {
-  const base = CONFIG.SECURITY_COOLDOWN_MS || 60000;
-  const mult = Math.pow(2, Math.min(securityStrike, 4));
+  const base = CONFIG.SECURITY_COOLDOWN_MS || 45000;
+  const mult = Math.pow(2, Math.min(Math.max(securityStrike - 1, 0), 3));
   return Math.min(base * mult, 300000);
 }
 
@@ -732,10 +733,14 @@ const TURNSTILE_LABEL_RE = /verify you are human|i'?m not a robot|are you human|
 
 // Cari checkbox turnstile dalam sebuah frame. Kembalikan ElementHandle biar bisa
 // diklik dengan mouse asli (elementHandle.click() → boundingBox + mouse events).
+// Hanya menerima checkbox yang jelas-jelas Turnstile: label/aria-label cocok,
+// ATAU checkbox apa pun di dalam iframe challenges.cloudflare.com.
 async function findTurnstileCheckbox(frame) {
   try {
+    const url = (frame.url() || "").toLowerCase();
+    const isCfIframe = /challenges\.cloudflare\.com|cdn-cgi|turnstile/.test(url);
     const handle = await frame.evaluateHandle(
-      (reSrc) => {
+      (reSrc, cf) => {
         const re = new RegExp(reSrc, "i");
         const cands = Array.from(document.querySelectorAll('input[type="checkbox"], [role="checkbox"], [aria-checked]'));
         const byLabel = cands.filter((cb) =>
@@ -743,9 +748,13 @@ async function findTurnstileCheckbox(frame) {
           re.test(cb.getAttribute("title") || "") ||
           re.test(cb.getAttribute("aria-describedby") || "")
         );
-        return byLabel.length ? byLabel[0] : cands[0] || null;
+        if (byLabel.length) return byLabel[0];
+        // Dalam iframe Cloudflare: checkbox apa pun yang terlihat = Turnstile.
+        if (cf && cands.length) return cands[0];
+        return null;
       },
-      TURNSTILE_LABEL_RE.source
+      TURNSTILE_LABEL_RE.source,
+      isCfIframe
     );
     const isNull = await handle.evaluate((el) => el === null).catch(() => true);
     if (isNull) return null;
@@ -756,18 +765,35 @@ async function findTurnstileCheckbox(frame) {
 }
 
 // Klik checkbox via mouse asli + JS click (kadang salah satu saja tidak cukup).
+// Gerakan mouse dibuat bertahap + jeda singkat sebelum klik → lebih "manusiawi"
+// sehingga Cloudflare tidak menolak (klik instan terdeteksi sebagai bot).
 async function clickCheckboxReal(handle) {
+  let clicked = false;
   try {
     const box = await handle.boundingBox();
     if (box && box.width > 0 && box.height > 0) {
+      const page = handle.executionContext().frame().page();
       const cx = box.x + box.width / 2;
       const cy = box.y + box.height / 2;
-      const page = handle.executionContext().frame().page();
-      await page.mouse.move(cx, cy);
-      await page.mouse.click(cx, cy);
+      const startX = Math.max(0, cx - (40 + Math.random() * 40));
+      const startY = Math.max(0, cy - (15 + Math.random() * 25));
+      await page.mouse.move(startX, startY);
+      const steps = 6;
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        await page.mouse.move(startX + (cx - startX) * t, startY + (cy - startY) * t);
+        await sleep(15 + Math.random() * 25);
+      }
+      await sleep(120 + Math.random() * 150);
+      await page.mouse.down();
+      await sleep(60 + Math.random() * 80);
+      await page.mouse.up();
+      clicked = true;
     }
   } catch (e) {}
-  try { await handle.evaluate((el) => { if (el && !el.checked) el.click(); }); } catch (e) {}
+  if (!clicked) {
+    try { await handle.evaluate((el) => { if (el && !el.checked) el.click(); }); } catch (e) {}
+  }
 }
 
 async function solveTurnstile(page, timeoutMs = 30000) {
@@ -811,14 +837,15 @@ async function solveTurnstile(page, timeoutMs = 30000) {
       }, TURNSTILE_LABEL_RE.source)
       .catch(() => ({ hasIframe: false, verifying: false, mainCheckbox: false }));
 
-    // Lolos: tidak ada iframe, tidak ada teks verifying, tidak ada checkbox.
+    // Lolos BERSIH: tidak ada iframe Turnstile, tidak ada teks verifying, tidak
+    // ada checkbox → halaman sudah normal, aman untuk kirim POST.
     if (!state.hasIframe && !state.verifying && !state.mainCheckbox) return true;
-    // Sudah tercentang & tidak verifying → lolos.
-    if (verified && !state.verifying) return true;
+    // Tercentang + iframe sudah HILANG → verifikasi selesai, lolos.
+    if (verified && !state.hasIframe && !state.mainCheckbox) return true;
     // Tidak ada elemen ditemukan & tidak verifying & tidak ada iframe → lolos.
     if (!anyFound && !state.verifying && !state.hasIframe) return true;
 
-    if (clicked) await sleep(1200);
+    if (clicked) await sleep(1500);
     else await sleep(700);
   }
   return false;
@@ -1443,12 +1470,15 @@ async function spamCourse(page, course, reloadCounter) {
         })
         .catch(() => false);
       if (hasCf) {
-        securityStrike++;
         log(`🛡 [${label}] Cloudflare di halaman — menyelesaikan challenge...`, "error");
         const okCf = await solveTurnstile(page);
-        if (!okCf) {
+        if (okCf) {
+          // Challenge berhasil dilewati → reset hitungan, cooldown berikutnya mulai dari dasar.
+          securityStrike = 0;
+        } else {
           await waitOutChallenge(page);
-          await solveTurnstile(page);
+          const ok2 = await solveTurnstile(page);
+          if (ok2) securityStrike = 0;
         }
         await sleep(1500);
         continue;
@@ -1506,7 +1536,8 @@ async function spamCourse(page, course, reloadCounter) {
           await page.goto(CONFIG.BASE_URL + CONFIG.KRS_PAGE, { waitUntil: "domcontentloaded", timeout: CONFIG.HTTP_TIMEOUT_MS });
         } catch (e) {}
         await waitOutChallenge(page);
-        await solveTurnstile(page);
+        const solvedCf = await solveTurnstile(page);
+        if (solvedCf) securityStrike = 0;
         await sleepAbortable(cool);
         continue;
       }

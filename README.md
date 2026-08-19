@@ -265,7 +265,7 @@ Config disimpan di `warkrs-config.json` (dibuat otomatis). Key penting:
 | `RETRY_DELAY_MS` | `5000` | Jeda antar percobaan |
 | `RETRY_JITTER_MS` | `3000` | Variasi acak biar tidak terlihat bot |
 | `SPAM_LIMIT` | `0` | 0 = tanpa batas |
-| `SECURITY_COOLDOWN_MS` | `60000` | Cooldown awal saat kena proteksi (backoff bertahap) |
+| `SECURITY_COOLDOWN_MS` | `45000` | Cooldown awal saat kena proteksi; naik 2× tiap kena beruntun (45s→90s→180s→maks 300s), reset setelah berhasil |
 | `RELOAD_EVERY_ATTEMPTS` | `15` | Reload halaman tiap N percobaan (segar-kan sesi) |
 | `AUTO_STOP_SKS` | `true` | Hentikan otomatis saat SKS penuh |
 | `SIAKAD_USERNAME` / `SIAKAD_PASSWORD` | `""` | Kredensial untuk **login ulang otomatis** |
@@ -296,7 +296,7 @@ Untuk pengguna baru: file config/state dibuat otomatis dengan nilai default — 
 |---|---|
 | `Brave/Chrome masih terbuka! Profil asli terkunci` | Tutup browser dulu (termasuk proses background), lalu ulangi |
 | `Sesi login kedaluwarsa` | Isi `SIAKAD_USERNAME`/`SIAKAD_PASSWORD` di tab Config → login otomatis; atau login manual di tab SIAKAD |
-| Cloudflare `Pemeriksaan Keamanan` berulang | Cek browser otomatis — bot akan klik Turnstile; perbesar `RETRY_DELAY_MS` bila rate-limit |
+| Cloudflare `Pemeriksaan Keamanan` berulang | Bot otomatis klik checkbox Turnstile dengan gerakan mouse manusiawi; cooldown mulai 45s dan naik bertahap hanya bila kena beruntun, lalu reset setelah berhasil. Kalau masih sering, perbesar `RETRY_DELAY_MS` |
 | Kode prodi salah / `tidak ditemukan` | Gunakan idkelas **numerik** (dari hasil scan), bukan kode `IF25-...` |
 | Captcha matematika tidak terbaca | Lihat `warkrs-debug-captcha.txt` & folder `captcha-debug/` untuk diagnosis |
 
