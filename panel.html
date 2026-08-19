@@ -309,6 +309,7 @@
       <div class="cfg"><div><div class="cl">Delay antar matkul</div></div><input id="cfgBatch" type="number"></div>
       <div class="cfg"><div><div class="cl">Cooldown proteksi</div></div><input id="cfgCooldown" type="number"></div>
       <label class="check"><input type="checkbox" id="cfgSks"> Hentikan otomatis saat SKS penuh</label>
+      <label class="check"><input type="checkbox" id="cfgSound"> Suara notifikasi (berhasil / kena Cloudflare)</label>
 
       <label class="label">Login SIAKAD otomatis (opsional)</label>
       <input class="inp" id="cfgUser" placeholder="email SIAKAD" style="margin-bottom:8px">
@@ -459,6 +460,7 @@ function renderConfig() {
   if (!cfgDirty.cfgBatch)   $("cfgBatch").value = c.BATCH_DELAY_MS || 0;
   if (!cfgDirty.cfgCooldown) $("cfgCooldown").value = c.SECURITY_COOLDOWN_MS || 0;
   if (!cfgDirty.cfgSks)     $("cfgSks").checked = c.AUTO_STOP_SKS !== false;
+  if (!cfgDirty.cfgSound)   $("cfgSound").checked = c.SOUND_ON !== false;
   if (!cfgDirty.cfgTgTok)   $("cfgTgTok").value = c.TELEGRAM_BOT_TOKEN || "";
   if (!cfgDirty.cfgTgChat)  $("cfgTgChat").value = c.TELEGRAM_CHAT_ID || "";
   if (!cfgDirty.cfgUser)    $("cfgUser").value = c.SIAKAD_USERNAME || "";
@@ -471,7 +473,7 @@ function renderConfig() {
 ["cfgRetry","cfgJitter","cfgLimit","cfgBatch","cfgCooldown","cfgTgTok","cfgTgChat","cfgUser","cfgPass"].forEach((id) => {
   $(id).addEventListener("input", () => { cfgDirty[id] = true; });
 });
-["cfgSks","cfgBrowser"].forEach((id) => {
+["cfgSks","cfgBrowser","cfgSound"].forEach((id) => {
   $(id).addEventListener("change", () => { cfgDirty[id] = true; });
 });
 
@@ -480,9 +482,36 @@ function renderLogs(rows) {
   const box = $("logBox");
   if (lastLog === 0) box.innerHTML = "";
   let html = "";
-  rows.forEach((l) => { html += '<div class="lrow ' + esc(l.type) + '"><span class="t">' + esc(l.ts) + "</span><span class=\"m\">" + esc(l.msg) + "</span></div>"; });
+  rows.forEach((l) => {
+    if (l.sound) playUiSound(l.sound);
+    html += '<div class="lrow ' + esc(l.type) + '"><span class="t">' + esc(l.ts) + "</span><span class=\"m\">" + esc(l.msg) + "</span></div>";
+  });
   box.insertAdjacentHTML("beforeend", html);
   box.scrollTop = box.scrollHeight;
+}
+
+// Suara notifikasi di panel (Web Audio API) — tidak butuh file audio.
+let __ac = null;
+function playUiSound(kind) {
+  try {
+    if (!__ac) __ac = new (window.AudioContext || window.webkitAudioContext)();
+    const ac = __ac;
+    const notes = kind === "success"
+      ? [[660, .18], [880, .24]]
+      : kind === "cloudflare"
+        ? [[400, .2], [400, .2], [320, .32]]
+        : [[280, .35]];
+    notes.forEach(([f, d]) => {
+      const o = ac.createOscillator();
+      const g = ac.createGain();
+      o.type = "sine";
+      o.frequency.value = f;
+      g.gain.value = 0.15;
+      o.connect(g); g.connect(ac.destination);
+      const t0 = ac.currentTime;
+      o.start(t0); o.stop(t0 + d);
+    });
+  } catch (e) {}
 }
 
 let modalResolve = null;
@@ -545,6 +574,7 @@ $("btnCfgSave").addEventListener("click", async () => {
     RETRY_DELAY_MS: +$("cfgRetry").value, RETRY_JITTER_MS: +$("cfgJitter").value,
     SPAM_LIMIT: +$("cfgLimit").value, BATCH_DELAY_MS: +$("cfgBatch").value,
     SECURITY_COOLDOWN_MS: +$("cfgCooldown").value, AUTO_STOP_SKS: $("cfgSks").checked,
+    SOUND_ON: $("cfgSound").checked,
     TELEGRAM_BOT_TOKEN: $("cfgTgTok").value.trim(), TELEGRAM_CHAT_ID: $("cfgTgChat").value.trim(),
     SIAKAD_USERNAME: $("cfgUser").value.trim(), SIAKAD_PASSWORD: $("cfgPass").value.trim(),
   };

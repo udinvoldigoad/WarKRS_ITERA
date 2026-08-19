@@ -127,14 +127,15 @@ function securityCooldownMs() {
   return Math.min(base * mult, 300000);
 }
 
-function pushPanelLog(type, msg) {
-  panelLogs.push({ seq: ++panelLogSeq, ts: ts(), type, msg });
+function pushPanelLog(type, msg, sound) {
+  panelLogs.push({ seq: ++panelLogSeq, ts: ts(), type, msg, sound: sound || "" });
   if (panelLogs.length > 500) panelLogs.splice(0, panelLogs.length - 500);
 }
 
-function log(msg, type = "info") {
+function log(msg, type = "info", opts) {
   clearStatus();
-  pushPanelLog(type, msg);
+  pushPanelLog(type, msg, opts && opts.sound);
+  if (opts && opts.sound) playSound(opts.sound);
   const c = TYPE_COLOR[type] || ANSI.reset;
   console.log(c + msg + ANSI.reset);
 }
@@ -158,8 +159,82 @@ function shortMessage(s) {
   return s.length > 70 ? s.slice(0, 70) + "…" : s;
 }
 
+// ─── SOUND NOTIFIKASI (lintas platform) ─────────────────────────────────────
+// Pola nada: [frekuensi Hz, durasi ms] berurutan. Diputar sebagai:
+//   win32   → PowerShell [console]::beep
+//   darwin  → afplay (suara sistem macOS)
+//   linux   → generate WAV → paplay / pw-play / aplay / ffplay
+const SOUND_PATTERNS = {
+  success: [[660, 180], [880, 240]],
+  cloudflare: [[400, 200], [400, 200], [320, 320]],
+  error: [[280, 350]],
+};
+
+function makeWav(notes) {
+  const sr = 16000;
+  const samples = [];
+  for (const [freq, ms] of notes) {
+    const n = Math.floor((sr * ms) / 1000);
+    for (let i = 0; i < n; i++) {
+      samples.push(Math.round(Math.sin((2 * Math.PI * freq * i) / sr) * 12000));
+    }
+    const gap = Math.floor((sr * 40) / 1000);
+    for (let i = 0; i < gap; i++) samples.push(0);
+  }
+  const dataLen = samples.length * 2;
+  const buf = Buffer.alloc(44 + dataLen);
+  buf.write("RIFF", 0);
+  buf.writeUInt32LE(36 + dataLen, 4);
+  buf.write("WAVE", 8);
+  buf.write("fmt ", 12);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(sr, 24);
+  buf.writeUInt32LE(sr * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36);
+  buf.writeUInt32LE(dataLen, 40);
+  samples.forEach((s, i) => buf.writeInt16LE(s, 44 + i * 2));
+  return buf;
+}
+
+function playSound(type) {
+  if (!CONFIG.SOUND_ON) return;
+  const notes = SOUND_PATTERNS[type] || SOUND_PATTERNS.error;
+  try {
+    const cp = require("child_process");
+    if (process.platform === "win32") {
+      const cmd = notes.map(([f, d]) => `[console]::beep(${f},${d})`).join(";");
+      const p = cp.spawn("powershell", ["-NoProfile", "-NonInteractive", "-Command", cmd], { stdio: "ignore", detached: true });
+      p.on("error", () => {});
+      p.unref();
+    } else if (process.platform === "darwin") {
+      const sound = type === "success"
+        ? "/System/Library/Sounds/Glass.aiff"
+        : type === "cloudflare"
+          ? "/System/Library/Sounds/Sosumi.aiff"
+          : "/System/Library/Sounds/Basso.aiff";
+      const p = cp.spawn("afplay", [sound], { stdio: "ignore", detached: true });
+      p.on("error", () => {});
+      p.unref();
+    } else {
+      const os = require("os");
+      const tmp = path.join(os.tmpdir(), `warkrs-sound-${Date.now()}.wav`);
+      fs.writeFileSync(tmp, makeWav(notes));
+      for (const player of ["paplay", "pw-play", "aplay", "ffplay"]) {
+        const p = cp.spawn(player, [tmp], { stdio: "ignore", detached: true });
+        p.on("error", () => {});
+        p.unref();
+        break;
+      }
+    }
+  } catch (e) {}
+}
+
 function beep() {
-  if (CONFIG.SOUND_ON) process.stdout.write("\x07");
+  playSound("success");
 }
 
 // ─── UTIL ───────────────────────────────────────────────────────────────────
@@ -1391,8 +1466,7 @@ async function spamCourse(page, course, reloadCounter) {
         course.status = "berhasil";
         course.log = `Masuk di percobaan #${attempt}`;
         clearStatus();
-        log(`✔ [${label}] BERHASIL! (coba #${attempt})`, "success");
-        beep();
+        log(`✔ [${label}] BERHASIL! (coba #${attempt})`, "success", { sound: "success" });
         await sendTelegram(`✅ <b>${label}</b> berhasil didaftarkan! (percobaan #${attempt})`);
         persist();
         reloadCounter.c = 0;
@@ -1419,7 +1493,7 @@ async function spamCourse(page, course, reloadCounter) {
           const title = (raw.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || "";
           const snippet = raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 160);
           const isTurnstile = /turnstile|cf-chl|challenge-platform/.test(raw);
-          log(`🛡 [${label}] Kena Cloudflare HTTP ${result.status} | title="${title}" | turnstile=${isTurnstile} | "${snippet}"`, "error");
+          log(`🛡 [${label}] Kena Cloudflare HTTP ${result.status} | title="${title}" | turnstile=${isTurnstile} | "${snippet}"`, "error", { sound: "cloudflare" });
         } catch (e) {}
         course.log = `#${attempt}: kena Cloudflare, reload + cooldown`;
         clearStatus();
