@@ -117,6 +117,13 @@ let panelSks = {};
 let panelBrowser = null;
 let panelPage = null;
 let warActive = false;
+// Promise yang selesai setelah alur navigasi+login AWAL panel beres (termasuk
+// nunggu login manual bila perlu). Action "war"/"scan" wajib menunggu ini
+// dulu sebelum menyentuh panelPage — kalau tidak, klik WAR yang kepencet
+// terlalu cepat setelah panel dibuka bisa berbarengan dengan alur login awal
+// cmdPanel(), dua-duanya navigasi ke page yang SAMA secara bersamaan
+// (checkbox Turnstile terus kereset, captcha kebaca kosong berulang).
+let panelPageReady = null;
 let securityStrike = 0; // jumlah kenangan Cloudflare beruntun → backoff bertahap
 
 // Cooldown Cloudflare naik bertahap tiap kena beruntun (45s → 90s → 180s → …,
@@ -869,9 +876,26 @@ async function isLoggedIn(page) {
 // Buka halaman KRS, tunggu Cloudflare, pastikan masih login.
 async function ensureKrsPage(page) {
   const url = CONFIG.BASE_URL + CONFIG.KRS_PAGE;
-  try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: CONFIG.HTTP_TIMEOUT_MS });
-  } catch (e) {} // timeout navigasi bukan masalah selama challenge belum selesai
+  // goto() bisa gagal karena 2 hal yang beda: (a) lambat/timeout gara-gara
+  // challenge Cloudflare — wajar, halaman tetap termuat sebagian; atau
+  // (b) navigasi gagal TOTAL (DNS/koneksi/reset) — tab tertinggal di
+  // about:blank. Kasus (b) dulu ditelan diam-diam sehingga waitOutChallenge
+  // di bawah salah kira "halaman kosong = tidak ada challenge = lolos".
+  // Sekarang di-retry beberapa kali & kegagalan total dilempar sebagai error.
+  let navigated = false;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: CONFIG.HTTP_TIMEOUT_MS });
+      navigated = true;
+      break;
+    } catch (e) {
+      if (page.url() !== "about:blank") { navigated = true; break; } // sempat termuat, cuma timeout
+      if (attempt < 3) await sleep(1500);
+    }
+  }
+  if (!navigated) {
+    throw new WarError("SECURITY", "Gagal membuka halaman SIAKAD (jaringan/DNS bermasalah, tab masih about:blank) setelah 3 percobaan.");
+  }
   let ok = await waitOutChallenge(page);
   if (!ok) {
     // Challenge masih muncul — kemungkinan ada checkbox Turnstile → klik otomatis.
@@ -1139,10 +1163,16 @@ async function solveCaptcha(page, tag) {
     if (!__ocrWorker) {
       __ocrWorker = await Tesseract.createWorker("eng", 1, { logger: () => {} });
       try {
-        await __ocrWorker.setParameters({
-          tessedit_char_whitelist: "0123456789+-xX?",
-          tessedit_pageseg_mode: "7",
-        });
+        // TANPA whitelist digit-saja: soalnya kalimat penuh ("Berapa hasil
+        // dari 8 x 2 ?"), bukan cuma angka. Whitelist yang cuma izinkan
+        // 0-9+-xX? dulu memaksa tesseract memetakan SETIAP huruf kata
+        // ("Berapa hasil dari"...) ke karakter terdekat yang diizinkan —
+        // itu bisa merusak spasi asli, sehingga "?" di akhir kalimat
+        // (dipisah spasi nyata dari angka) malah nempel jadi digit palsu
+        // ke operand sebelumnya (mis. "...2 ?" terbaca "...27"). Model
+        // bahasa penuh jauh lebih akurat baca huruf+digit+spasi apa adanya;
+        // parser solveMathCaptcha() di bawah yang menyaring huruf jadi spasi.
+        await __ocrWorker.setParameters({ tessedit_pageseg_mode: "7" });
       } catch (e) {}
     }
     saveCaptchaDebug(originals, variants, tag);
@@ -1186,12 +1216,11 @@ function solveMathCaptcha(text) {
     .replace(/[^0-9+\-x×X*÷/]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  // Cari SEMUA pola "angka op angka" (2 digit maks). Non-greedy pada angka
-  // kedua supaya "6+77" dibaca "6+7" (bukan "6+77") — digit duplikat dari
-  // "?" tidak ikut. Ambil kandidat dengan operand paling kecil (paling kredibel).
-  let best = "";
-  let bestScore = Infinity;
-  const re = /(\d{1,2}?)\s*([+\-x×X*÷/])\s*(\d{1,2}?)/g;
+  // Cari pola "angka op angka" (2 digit maks) GREEDY, ambil match valid
+  // pertama dari kiri. (Sebelumnya non-greedy + rescan per-karakter memilih
+  // "operand terkecil" sebagai paling kredibel — itu malah memotong angka
+  // 2 digit di tengah, mis. "18+57" terbaca jadi "8+5"=13 alih-alih 75.)
+  const re = /(\d{1,2})\s*([+\-x×X*÷/])\s*(\d{1,2})/g;
   let m;
   while ((m = re.exec(t)) !== null) {
     const a = parseInt(m[1], 10);
@@ -1203,11 +1232,9 @@ function solveMathCaptcha(text) {
     else if (/[x×X*]/.test(op)) r = a * b;
     else if (/[÷/]/.test(op) && b !== 0) r = Math.round(a / b);
     if (r === null || r < -50 || r > 99) continue; // hasil wajar captcha sederhana
-    const score = Math.max(a, b); // angka kecil lebih kredibel
-    if (score < bestScore) { bestScore = score; best = String(r); }
-    re.lastIndex = m.index + 1; // lanjut cari dari posisi berikutnya
+    return String(r);
   }
-  return best;
+  return "";
 }
 
 // Isi form login (username, password, captcha) lalu submit. Kembalikan true
@@ -2425,11 +2452,15 @@ async function handleAction(action, data) {
       persist();
       return { ok: true };
     case "scan":
+      if (panelPageReady) { try { await panelPageReady; } catch (e) {} }
       return actionScan();
     case "war":
       if (warActive) return { ok: false, message: "WAR sudah berjalan." };
       if (!state.courses.length) return { ok: false, message: "Belum ada target." };
       if (!panelPage) return { ok: false, message: "Browser belum siap." };
+      // Tunggu alur login-awal beres dulu — cegah rebutan navigasi di page
+      // yang sama dengan cmdPanel() (lihat komentar di deklarasi panelPageReady).
+      if (panelPageReady) { try { await panelPageReady; } catch (e) {} }
       state.courses.forEach((c) => { if (c.status !== "berhasil") { c.status = "antri"; c.retries = 0; } });
       persist();
       warActive = true;
@@ -2528,33 +2559,39 @@ async function cmdPanel() {
   }
   try { await panelTab.bringToFront(); } catch (e) {}
 
-  try {
-    await ensureKrsPage(page);
-  } catch (e) {
-    if (e.code === "SESSION_EXPIRED") {
-      log("🔒 Belum login — mencoba login otomatis...", "warn");
-      try { await page.goto(CONFIG.BASE_URL, { waitUntil: "domcontentloaded", timeout: CONFIG.HTTP_TIMEOUT_MS }); } catch (e2) {}
-      await waitOutChallenge(page);
-      await solveTurnstile(page);
-      const autoOk = await autoLogin(page);
-      if (autoOk) {
-        log("✅ Login otomatis berhasil — membuka halaman KRS.", "success");
-        try { await ensureKrsPage(page); } catch (e3) { log("⚠ Gagal buka KRS: " + e3.message, "warn"); }
-      } else {
-        log("⚠ Login otomatis gagal/absen kredensial — login di TAB SIAKAD (panel ada di tab sebelah).", "warn");
-        waitForLogin(page).then(async (ok) => {
+  // Alur navigasi+login awal dijalankan lewat panelPageReady (bukan langsung
+  // di-await di sini) supaya log "Panel siap" tetap tampil cepat SEKALIGUS
+  // action lain (war/scan) tetap bisa menunggu alur ini beres lewat promise
+  // yang sama — tidak dobel-navigasi ke page yang sama seperti sebelumnya.
+  panelPageReady = (async () => {
+    try {
+      await ensureKrsPage(page);
+    } catch (e) {
+      if (e.code === "SESSION_EXPIRED") {
+        log("🔒 Belum login — mencoba login otomatis...", "warn");
+        try { await page.goto(CONFIG.BASE_URL, { waitUntil: "domcontentloaded", timeout: CONFIG.HTTP_TIMEOUT_MS }); } catch (e2) {}
+        await waitOutChallenge(page);
+        await solveTurnstile(page);
+        const autoOk = await autoLogin(page);
+        if (autoOk) {
+          log("✅ Login otomatis berhasil — membuka halaman KRS.", "success");
+          try { await ensureKrsPage(page); } catch (e3) { log("⚠ Gagal buka KRS: " + e3.message, "warn"); }
+        } else {
+          log("⚠ Login otomatis gagal/absen kredensial — login di TAB SIAKAD (panel ada di tab sebelah).", "warn");
+          const ok = await waitForLogin(page);
           if (ok) {
             log("✅ Login terdeteksi — membuka halaman KRS.", "success");
             try { await ensureKrsPage(page); } catch (e3) { log("⚠ Gagal buka KRS: " + e3.message, "warn"); }
           }
-        });
+        }
+      } else if (e.code === "SECURITY") {
+        log("🛡 Cloudflare challenge tidak lolos — cek jendela browser.", "error");
+      } else {
+        log("⚠ Gagal buka KRS: " + e.message, "warn");
       }
-    } else if (e.code === "SECURITY") {
-      log("🛡 Cloudflare challenge tidak lolos — cek jendela browser.", "error");
-    } else {
-      log("⚠ Gagal buka KRS: " + e.message, "warn");
     }
-  }
+  })();
+  panelPageReady.catch(() => {});
 
   log("✅ Panel siap — operasikan semua lewat panel. (Ctrl+C untuk menutup)", "success");
   await new Promise((resolve) => {

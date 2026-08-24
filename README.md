@@ -308,4 +308,4 @@ MIT — silakan gunakan, modifikasi, dan distribusikan.
 
 ---
 
-> **DISCLAIMER**: Untuk keperluan edukasi. Gunakan secara bertanggung jawab sesuai peraturan ITERA. Script ini hanya **menambah matkul ke draft KRS**, tidak menyimpan/memfinalisasi KRS.
+> **ORANG JAHAT TERLAHIR DARI ORANG BAIK YANG KALAH WAR KRS AWKAWKAWK**

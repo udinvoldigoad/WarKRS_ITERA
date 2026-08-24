@@ -5,7 +5,7 @@
 const fs = require("fs");
 const path = require("path");
 
-// ─── FILE PENYIMPANAN ───────────────────────────────────────────────────────
+// file penyimpanan
 const DIR = __dirname;
 const CONFIG_FILE = path.join(DIR, "warkrs-config.json");
 const STATE_FILE = path.join(DIR, "warkrs-state.json");
@@ -31,7 +31,7 @@ const DEFAULT_CONFIG = {
   COOKIE: "",                                // Cookie sesi login (isi via perintah `cookie`)
 };
 
-// ─── LOAD / SAVE ────────────────────────────────────────────────────────────
+// load / save
 function loadJson(file, fallback) {
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -66,7 +66,7 @@ function saveConfig() {
   saveJson(CONFIG_FILE, CONFIG);
 }
 
-// ─── TERMINAL OUTPUT (ANSI colors) ──────────────────────────────────────────
+// warna output terminal
 const ANSI = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
@@ -97,7 +97,7 @@ function shortMessage(s) {
   return s.length > 70 ? s.slice(0, 70) + "…" : s;
 }
 
-// ─── UTIL ───────────────────────────────────────────────────────────────────
+// util
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -121,7 +121,7 @@ function decodeEntities(s) {
     .replace(/&#0?39;/g, "'");
 }
 
-// ─── HTTP CLIENT (cookie jar sederhana) ─────────────────────────────────────
+// HTTP CLIENT
 const jar = new Map(); // name -> value
 
 function initJar(cookieStr) {
@@ -171,7 +171,7 @@ async function http(url, { method = "GET", headers = {}, body } = {}) {
   return res;
 }
 
-// ─── PARSING HTML SIAKAD ────────────────────────────────────────────────────
+// parsing html siakad
 function extractAttr(tag, attr) {
   const m =
     tag.match(new RegExp(attr + '\\s*=\\s*"([^"]*)"', "i")) ||
@@ -234,7 +234,7 @@ function parseAvailable(html) {
   }
   return out;
 }
-// ─── SIAKAD API ─────────────────────────────────────────────────────────────
+// SIAKAD API
 class WarError extends Error {
   constructor(code, message) {
     super(message);
@@ -370,9 +370,7 @@ function extractAlertText(text) {
   return msg.length > 8 ? msg : "";
 }
 
-/**
- * Daftarkan satu matkul ke KRS.
- */
+// Daftarkan satu matkul ke KRS.
 async function enrollCourse(course, csrf) {
   const url = /^https?:\/\//i.test(CONFIG.ENDPOINT)
     ? CONFIG.ENDPOINT
@@ -404,7 +402,7 @@ async function enrollCourse(course, csrf) {
   return analyzeEnrollResponse(res.status, contentType, text, res.url);
 }
 
-// ─── TELEGRAM ───────────────────────────────────────────────────────────────
+// hubungkan ke telegram
 async function sendTelegram(text) {
   if (!CONFIG.TELEGRAM_BOT_TOKEN || !CONFIG.TELEGRAM_CHAT_ID) return;
   try {
@@ -426,7 +424,7 @@ async function sendTelegram(text) {
   }
 }
 
-// ─── PARSING INPUT TARGET ───────────────────────────────────────────────────
+// PARSING INPUT TARGET
 /**
  *   "43254 - Kapita Selekta - RA"   (idkelas diketahui)
  *   "Kapita Selekta - RA"           (nama + kelas → cari idkelas dari hasil scan)
@@ -480,7 +478,7 @@ function findAvailable(query, kelas) {
 function courseLabel(course) {
   return course.kelas ? `${course.name} ${course.kelas}` : course.name;
 }
-// ─── CORE WAR ENGINE ────────────────────────────────────────────────────────
+// INTI Mesin tempurnya cuy
 async function spamCourse(course) {
   const label = courseLabel(course);
   course.status = "proses";
@@ -1038,8 +1036,3 @@ main().catch((e) => {
   log("Fatal: " + e.message, "error");
   process.exitCode = 1;
 });
-
-
-
-
-
