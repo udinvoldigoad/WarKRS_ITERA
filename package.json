@@ -1,14 +1,29 @@
 {
   "name": "warkrs",
   "version": "1.0.0",
-  "description": "WAR KRS - auto-enroll mata kuliah SIAKAD ITERA via panel browser (aktif dari terminal)",
-  "main": "warkrs-bot.js",
+  "description": "WAR KRS - aplikasi desktop SIAKAD ITERA dengan wizard persiapan",
+  "main": "src/desktop/main.js",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/udinvoldigoad/WarKRS_ITERA.git"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
-    "start": "node warkrs-bot.js panel",
-    "panel": "node warkrs-bot.js panel",
-    "menu": "node warkrs-bot.js",
-    "doctor": "node warkrs-bot.js doctor",
-    "war": "node warkrs-bot.js war"
+    "start": "electron .",
+    "desktop": "electron .",
+    "prepare:runtime": "node scripts/prepare-runtime.js",
+    "prepare:browser": "node scripts/prepare-browser.js",
+    "build:installer": "npm run prepare:runtime && npm run prepare:browser && electron-builder --win nsis --x64",
+    "test": "npm run test:desktop",
+    "test:desktop": "node --test tests/desktop.test.js",
+    "test:smoke": "node scripts/smoke-desktop.js",
+    "preview:ui": "node scripts/preview-ui.js",
+    "menu": "node src/bot.js",
+    "doctor": "node src/bot.js doctor",
+    "war": "node src/bot.js war"
   },
   "keywords": [
     "siakad",
@@ -22,9 +37,54 @@
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
+    "@puppeteer/browsers": "^3.2.3",
     "puppeteer-core": "^25.6.0",
-    "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "tesseract.js": "^7.0.0"
+  },
+  "build": {
+    "appId": "id.itera.warkrs",
+    "productName": "WAR KRS",
+    "asar": true,
+    "electronDist": "node_modules/electron/dist",
+    "npmRebuild": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "LICENSE"
+    ],
+    "extraResources": [
+      {
+        "from": "build/browser",
+        "to": "browser"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "WAR-KRS-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": false
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3"
   }
 }

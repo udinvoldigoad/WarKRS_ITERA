@@ -1,311 +1,209 @@
-# ⚔ WAR KRS — Auto-Enroll KRS SIAKAD ITERA
+# WAR KRS ITERA
 
-> Auto-enroll mata kuliah KRS dengan **panel UI di browser**, dijalankan dari **terminal**. Tahan refresh SIAKAD, lolos Cloudflare & Turnstile, login ulang otomatis, dan progres tersimpan aman.
+Aplikasi desktop Windows untuk membantu pengambilan KRS di SIAKAD ITERA.
+Persiapan dilakukan melalui tiga langkah: login di browser khusus, pilih mata
+kuliah dan kelas, lalu jalankan WAR sambil memantau hasilnya.
 
-**WAR KRS** adalah bot automasi pengisian KRS (Kartu Rencana Studi) untuk SIAKAD ITERA. Bot mengendalikan browser asli kamu (Chrome / Brave) dengan profil pribadi, membuka panel kontrol di tab terpisah, lalu melakukan request pendaftaran matkul secara otomatis sampai berhasil — dengan deteksi anti-bot yang mumpuni.
+## Pilih cara instalasi
 
----
+| Kebutuhan | Panduan |
+| --- | --- |
+| Menggunakan aplikasi tanpa mengubah kode | [Installer Windows](#instal-dari-installer-windows) |
+| Menjalankan aplikasi dari kode sumber | [Kode sumber](#instal-dari-kode-sumber) |
+| Membuat installer untuk dibagikan | [Build installer](#build-installer-windows) |
 
-## ✨ Fitur Unggulan
+## Instal dari installer Windows
 
-| Fitur | Deskripsi |
-|---|---|
-| 🖥 **Panel UI** | Cari & klik `+` untuk menambah matkul, pantau status war real-time — tanpa ngetik command |
-| 🛡 **Lolos Cloudflare** | Stealth mode + auto-klik Turnstile "Verify you are human" di semua frame |
-| 🔑 **Login ulang otomatis** | Isi email + password + pecahkan **captcha matematika** via OCR (tesseract.js) |
-| 🌐 **Multi-browser** | Chrome / Brave, pakai profil asli kamu |
-| ⚔ **War otomatis** | Retry + jitter acak, backoff cooldown, stop saat error permanen |
-| 📊 **Deteksi SKS** | Hentikan otomatis saat jatah SKS penuh |
-| 💬 **Notifikasi Telegram** | Pantau dari HP saat war berjalan |
-| 💾 **State tersimpan** | Tahan restart — lanjut dari yang belum berhasil |
+**Persyaratan:** komputer Windows x64, koneksi internet untuk mengakses SIAKAD,
+dan akun SIAKAD ITERA.
 
----
+1. Siapkan file `WAR-KRS-Setup-1.0.0.exe` dari hasil build aplikasi.
+   Installer tidak disimpan di Git; clone atau unduh ZIP repo tidak menyertakan
+   file `.exe`. Jika belum punya installer, gunakan panduan kode sumber di bawah.
+2. Klik dua kali file installer, pilih folder instalasi, lalu selesaikan prosesnya.
+3. Buka **WAR KRS** melalui shortcut desktop atau Start Menu.
+4. Ikuti [panduan penggunaan](#cara-menggunakan-aplikasi).
 
-## 🏗 Arsitektur
+Installer sudah menyertakan Electron dan Chrome for Testing. Pengguna installer
+tidak perlu memasang Node.js, npm, atau browser tambahan. Installer belum
+ditandatangani secara digital.
 
-### Data Flow Diagram (DFD Level 0)
+## Instal dari kode sumber
 
-```mermaid
-flowchart TD
-    USER([Pengguna]) -->|klik Pindai / Tambah / MULAI WAR| PANEL[Panel UI\nlocalhost:8765]
-    PANEL -->|HTTP /api/action| BOT[Warkrs Bot\nNode.js + Puppeteer]
-    BOT -->|membuka + kontrol| BROWSER[Browser Asli\nEdge/Chrome/Brave]
-    BROWSER -->|request POST simpanKRS| CF{Cloudflare\nTurnstile}
-    CF -->|lolos| SIAKAD[(SIAKAD ITERA)]
-    CF -->|challenge| BOT
-    BOT -->|loloskan challenge\nklik checkbox| BROWSER
-    SIAKAD -->|cek sesi| SSO[SSO sso.itera.ac.id]
-    SSO -->|login + captcha math| BOT
-    BOT -->|save state| STATE[(warkrs-state.json)]
-    BOT -->|save config| CONF[(warkrs-config.json)]
-    BOT -->|notif| TG[Telegram Bot]
+### 1. Siapkan alat
+
+- Windows x64 untuk menjalankan dan membangun aplikasi desktop ini.
+- **Node.js minimal 22.12.0** beserta npm, tersedia di
+  [halaman unduhan resmi Node.js](https://nodejs.org/en/download). Pilih installer
+  untuk Windows x64 dan ikuti langkah instalasinya. Batas versi ini mengikuti
+  kebutuhan Electron dan Puppeteer yang dipakai proyek.
+- [Git for Windows](https://git-scm.com/install/windows) untuk mengambil kode
+  melalui terminal. Unduh installer x64 dan selesaikan instalasi dengan opsi
+  bawaan. Jika memakai ZIP repo, ekstrak
+  terlebih dahulu dan buka terminal di folder hasil ekstraksi.
+- Koneksi internet untuk mengunduh dependensi, runtime Electron, dan browser.
+
+Buka PowerShell, lalu periksa alat yang terpasang:
+
+```powershell
+node --version
+npm --version
+git --version
 ```
 
-### Data Flow Diagram (Level 1 — Alur War)
+Jika salah satu perintah tidak dikenali, pasang alat tersebut dan buka ulang
+PowerShell. Pemeriksaan Git dapat dilewati jika menggunakan ZIP.
 
-```mermaid
-flowchart LR
-    START([Start]) --> LOAD[Load config + state]
-    LOAD --> OPEN[Launch browser dengan profil asli]
-    OPEN --> LOGIN{Sudah login?}
-    LOGIN -- Ya --> KRS[Buka halaman KRS]
-    LOGIN -- Tidak --> AUTO[Auto-login\nemail+pass+captcha OCR]
-    AUTO --> KRS
-    KRS --> SCAN[Scan daftar matkul]
-    SCAN --> TARGET[Pilih target matkul]
-    TARGET --> WAR{MULAI WAR}
-    WAR --> LOOP[Loop percobaan]
-    LOOP --> POST[POST simpanKRS]
-    POST --> CHK{Kena Cloudflare?}
-    CHK -- Ya --> SOLVE[Reload + klik Turnstile]
-    SOLVE --> COOLDOWN[Cooldown backoff]
-    COOLDOWN --> LOOP
-    CHK -- Tidak --> RES{Sukses?}
-    RES -- Ya --> DONE[✅ Matkul masuk KRS]
-    RES -- Error permanen --> STOP[⛔ Berhenti matkul ini]
-    RES -- Lainnya --> WAIT[Jeda + jitter]
-    WAIT --> LOOP
-```
+### 2. Ambil kode
 
-### Entity Relationship Diagram (ERD)
-
-```mermaid
-erDiagram
-    CONFIG ||--o{ STATE : "membaca"
-    CONFIG {
-        string BASE_URL
-        string KRS_PAGE
-        string ENDPOINT
-        int RETRY_DELAY_MS
-        int RETRY_JITTER_MS
-        int SPAM_LIMIT
-        int SECURITY_COOLDOWN_MS
-        string BROWSER
-        boolean USE_REAL_PROFILE
-        string SIAKAD_USERNAME
-        string SIAKAD_PASSWORD
-        string TELEGRAM_BOT_TOKEN
-        string TELEGRAM_CHAT_ID
-    }
-    STATE ||--|{ COURSE : "berisi"
-    STATE ||--|{ AVAILABLE : "cache scan"
-    STATE {
-        string updatedAt
-    }
-    COURSE {
-        string id
-        string kode
-        string nama
-        string kelas
-        string status
-        int retries
-        string log
-    }
-    AVAILABLE {
-        string idkelas
-        string kode
-        string nama
-        string kelas
-        string label
-    }
-    BROWSER ||--o{ COURSE : "didaftarkan ke"
-    BROWSER {
-        string nama "Chrome|Brave"
-        string profileDir
-    }
-```
-
----
-
-## 🚀 Instalasi
-
-**Persyaratan:**
-
-- **Node.js** v18+ (disarankan v20+)
-- **Chrome / Brave** terpasang
-- **Cross-platform**: Windows, macOS, Linux
-
-```bash
+```powershell
 git clone https://github.com/udinvoldigoad/WarKRS_ITERA.git
-cd warkrs
-npm install
+cd WarKRS_ITERA
 ```
 
----
+Semua perintah berikut dijalankan dari folder repo yang berisi `package.json`.
 
-## 🕹 Cara Pakai
-
-Berikut alur lengkap untuk **Windows**, **macOS**, dan **Linux**. Prinsipnya sama — bedanya hanya cara membuka terminal dan menjalankan perintah pertama.
-
----
-
-### 🪟 Windows
-
-**1) Buka terminal**
-
-Klik kanan di folder `warkrs` → **Open in Terminal** (atau buka `PowerShell`/`CMD` lalu `cd` ke folder proyek).
-
-**2) Install dependensi** (cukup sekali)
+### 3. Pasang dependensi dan siapkan browser
 
 ```powershell
-npm install
+npm ci
+npm run prepare:runtime
+npm run prepare:browser
 ```
 
-**3) Jalankan panel**
+`npm ci` memasang versi dependensi sesuai `package-lock.json`. Perintah ini
+mengganti isi `node_modules` jika folder tersebut sudah ada.
+`prepare:runtime` memastikan executable Electron tersedia. `prepare:browser`
+mengunduh Chrome for Testing ke `build/browser/`; browser yang sudah tersedia
+di folder tersebut akan dipakai kembali.
+
+Tunggu sampai setiap perintah selesai tanpa error sebelum melanjutkan.
+Unduhan pertama bisa memerlukan waktu lebih lama.
+
+### 4. Jalankan aplikasi
 
 ```powershell
 npm start
 ```
 
-> 💡 Atau **double-click `KLIK-UNTUK-WAR.bat`** — langsung jalan tanpa buka terminal.
+Dashboard WAR KRS akan terbuka. Biarkan terminal tetap terbuka selama aplikasi
+digunakan. Untuk penggunaan berikutnya, cukup buka terminal di folder repo dan
+jalankan `npm start` lagi.
 
-**4) Tutup browser kamu** (profil asli terkunci saat browser jalan), lalu ikuti langkah umum di bawah.
+## Cara menggunakan aplikasi
 
----
+1. Buka **Persiapan WAR**, lalu klik **Buka browser SIAKAD**.
+2. Login langsung di jendela browser tersebut dan selesaikan verifikasi manusia
+   jika diminta. Password dimasukkan di SIAKAD.
+3. Kembali ke aplikasi, klik **Periksa login & lanjut**.
+4. Klik **Pindai kelas**, cari mata kuliah, lalu klik **Tambah** pada kelas yang
+   diinginkan. Periksa kode, nama, dan kelas sebelum menambah target.
+5. Klik **Tinjau & mulai WAR**, periksa antrean, lalu klik **MULAI WAR**.
+6. Pantau progres di halaman **Mulai WAR** atau **Aktivitas**. Gunakan
+   **HENTIKAN WAR** jika ingin berhenti; jangan tutup browser saat proses berjalan.
+7. Periksa daftar KRS di SIAKAD untuk memastikan hasil pengambilan.
 
-### 🍏 macOS
+Menu **Settings** mengatur notifikasi Windows, suara, jeda dan variasi percobaan,
+batas percobaan per target, penghentian saat SKS penuh, serta bantuan verifikasi
+Cloudflare dan cooldown proteksi. Klik **Simpan pengaturan** setelah mengubahnya.
+Hentikan WAR sebelum mengubah pengaturan. Batas percobaan `0` berarti terus
+mencoba sampai berhasil, gagal permanen, atau dihentikan.
 
-**1) Buka Terminal**
+Verifikasi Cloudflare bergantung pada server dan tidak dijamin selesai otomatis.
+Jika diperlukan, lakukan verifikasi langsung di browser khusus aplikasi.
 
-`Cmd + Space` → ketik `Terminal` → `Enter`. Lalu masuk ke folder proyek:
+## Build installer Windows
 
-```bash
-cd "path/ke/folder/warkrs"
+Setelah instalasi kode sumber selesai, jalankan di Windows x64:
+
+```powershell
+npm test
+npm run test:smoke
+npm run build:installer
 ```
 
-> 💡 Cara mudah: ketik `cd ` lalu seret folder ke jendela Terminal.
+Build menyiapkan runtime Electron dan browser, lalu membuat installer NSIS.
+Build pertama membutuhkan internet untuk mengunduh komponen yang belum tersedia.
+Hasil untuk versi saat ini:
 
-**2) Install dependensi** (cukup sekali)
-
-```bash
-npm install
+```text
+dist/WAR-KRS-Setup-1.0.0.exe
 ```
 
-**3) Jalankan panel**
+Nama file mengikuti versi di `package.json`. Bagikan file installer tersebut;
+pengguna tidak memerlukan folder kode sumber. Folder `build/` dan `dist/`
+diabaikan Git. Pertahankan `build/browser/` agar browser tidak perlu diunduh
+ulang pada build berikutnya.
 
-```bash
-npm start
-```
-
-**4) Tutup browser kamu** (klik `Cmd + Q` pada Chrome/Brave), lalu ikuti langkah umum di bawah.
-
----
-
-### 🐧 Linux
-
-**1) Buka terminal**
-
-`Ctrl + Alt + T`, lalu masuk ke folder proyek:
-
-```bash
-cd "path/ke/folder/warkrs"
-```
-
-**2) Install dependensi** (cukup sekali)
-
-```bash
-npm install
-```
-
-> Jika gagal karena izin: `npm install` tanpa `sudo` — atau gunakan Node.js via [nvm](https://github.com/nvm-sh/nvm).
-
-**3) Jalankan panel**
-
-```bash
-npm start
-```
-
-**4) Tutup browser kamu** (profil asli terkunci saat browser jalan), lalu ikuti langkah umum di bawah.
-
----
-
-### ✅ Langkah Umum (setelah panel terbuka di semua OS)
-
-1. Browser otomatis terbuka dengan 2 tab: **Panel** (`http://127.0.0.1:8765`) + **SIAKAD**.
-2. Kalau belum login → buka tab SIAKAD → login sekali (tersimpan). *Opsional: isi NIM + Password di tab Config agar **login ulang otomatis** saat sesi kedaluwarsa.*
-3. Di panel: klik **Pindai** → ketik di kolom cari → klik **+** pada matkul tujuan.
-4. Klik **MULAI WAR** — pantau status di panel, lihat SIAKAD di tab sebelah.
-
-> **Penting**: Jangan tutup browser saat war berjalan. Kalau sesi kedaluwarsa, bot login ulang otomatis (atau tunggu login manual di tab SIAKAD) lalu war lanjut.
-
----
-
-## 📟 Perintah Terminal
+## Perintah pengembangan
 
 | Perintah | Fungsi |
-|---|---|
-| `npm start` / `node warkrs-bot.js panel` | Buka panel UI |
-| `node warkrs-bot.js doctor` | Diagnostik (browser, login, periode KRS) |
-| `node warkrs-bot.js login` | Login sekali di jendela otomatis (tersimpan) |
-| `node warkrs-bot.js scan [filter]` | Pindai daftar kelas |
-| `node warkrs-bot.js add "Nama - Kelas"` | Tambah target |
-| `node warkrs-bot.js list` | Lihat target |
-| `node warkrs-bot.js war` | MULAI WAR (CLI) |
-| `node warkrs-bot.js config set KEY VALUE` | Ubah config |
+| --- | --- |
+| `npm start` / `npm run desktop` | Membuka aplikasi Electron |
+| `npm run prepare:runtime` | Memastikan runtime Electron tersedia |
+| `npm run prepare:browser` | Menyiapkan Chrome for Testing Windows x64 |
+| `npm test` / `npm run test:desktop` | Menguji mesin desktop dengan data sementara |
+| `npm run test:smoke` | Menguji Electron, IPC, dan alur UI tanpa login SIAKAD |
+| `npm run preview:ui` | Membuat screenshot UI dengan data contoh di `build/` |
+| `npm run build:installer` | Membuat installer Windows x64 di `dist/` |
+| `npm run menu` | Membuka menu terminal untuk penggunaan lanjutan |
+| `npm run doctor` | Membuka browser untuk diagnosis SIAKAD, login, dan periode KRS |
+| `node src/bot.js help` | Menampilkan bantuan perintah terminal |
 
-**Format input `add` fleksibel** — semuanya jalan:
+Smoke test dan preview UI memerlukan runtime/browser yang sudah disiapkan.
+Mode terminal mendeteksi Chrome atau Brave yang terpasang di komputer dan memakai
+data terpisah dari aplikasi desktop. `doctor` mengakses SIAKAD, sehingga
+memerlukan koneksi internet dan mungkin interaksi login.
 
+## Struktur repo
+
+```text
+src/
+  bot.js                 Mesin browser, perintah terminal, dan proses WAR KRS
+  desktop/
+    main.js              Proses utama Electron dan komunikasi dengan mesin
+    preload.js           Jembatan IPC untuk renderer
+    engine.js            Penanganan aksi desktop
+    index.html           Dashboard dan wizard persiapan
+    renderer.js          Interaksi antarmuka
+    styles.css           Tampilan aplikasi
+scripts/                 Persiapan runtime/browser, smoke test, dan preview UI
+tests/                   Pengujian mesin desktop
+data/legacy/             Data mode terminal (diabaikan Git)
+build/                   Browser dan screenshot pengembangan (diabaikan Git)
+dist/                    Installer hasil build (diabaikan Git)
 ```
-Kapita Selekta - RA
-43106
-IF25-21008 - Jaringan Komputer - RA
-43106  IF25-21008 - Jaringan Komputer - RA   (copy dari hasil scan)
-```
 
----
+## Penyimpanan data
 
-## ⚙️ Konfigurasi
+- **Desktop:** `%APPDATA%\warkrs`, terpisah dari folder instalasi.
+- **Terminal:** `data/legacy/` di dalam repo.
+- Konfigurasi, target/progres, dan profil browser disimpan lokal. Uninstall
+  aplikasi desktop mempertahankan data tersebut.
+- Folder data, profil browser, konfigurasi lokal, dan file sesi diabaikan Git.
+  Jangan membagikan isinya karena dapat memuat sesi login dan data pribadi.
 
-Config disimpan di `warkrs-config.json` (dibuat otomatis). Key penting:
+## Mengatasi masalah instalasi
 
-| Key | Default | Fungsi |
-|---|---|---|
-| `BROWSER` | `auto` | `auto` / `chrome` / `brave` |
-| `USE_REAL_PROFILE` | `true` | Pakai profil asli browser (harus tutup browser dulu) |
-| `RETRY_DELAY_MS` | `5000` | Jeda antar percobaan |
-| `RETRY_JITTER_MS` | `3000` | Variasi acak biar tidak terlihat bot |
-| `SPAM_LIMIT` | `0` | 0 = tanpa batas |
-| `SECURITY_COOLDOWN_MS` | `45000` | Cooldown awal saat kena proteksi; naik 2× tiap kena beruntun (45s→90s→180s→maks 300s), reset setelah berhasil |
-| `RELOAD_EVERY_ATTEMPTS` | `15` | Reload halaman tiap N percobaan (segar-kan sesi) |
-| `AUTO_STOP_SKS` | `true` | Hentikan otomatis saat SKS penuh |
-| `SIAKAD_USERNAME` / `SIAKAD_PASSWORD` | `""` | Kredensial untuk **login ulang otomatis** |
-| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | `""` | Notifikasi Telegram (opsional) |
+| Masalah | Langkah penyelesaian |
+| --- | --- |
+| `node`, `npm`, atau `git` tidak dikenali | Pastikan alat terpasang dan tersedia di PATH, lalu buka ulang terminal. |
+| PowerShell menolak menjalankan `npm.ps1` | Gunakan `npm.cmd` sebagai pengganti `npm`, misalnya `npm.cmd ci` dan `npm.cmd start`. |
+| Error versi Node.js / `EBADENGINE` | Pastikan `node --version` minimal `22.12.0`, lalu jalankan ulang `npm ci`. |
+| Unduhan dependensi/runtime/browser gagal | Periksa koneksi dan akses unduhan melalui jaringan/proxy, lalu ulangi perintah yang gagal. |
+| Runtime Electron tidak ditemukan | Jalankan `npm run prepare:runtime`; jika dependensi belum lengkap, jalankan `npm ci` terlebih dahulu. |
+| Browser tidak ditemukan saat menjalankan kode sumber | Jalankan `npm run prepare:browser`, lalu buka ulang aplikasi. |
+| Browser tidak ditemukan pada aplikasi hasil instalasi | Instal ulang dari installer yang menyertakan browser. |
+| Login belum terdeteksi | Selesaikan login di browser khusus, lalu klik **Periksa login & lanjut**. |
+| Daftar kelas kosong | Pastikan login sudah diperiksa dan halaman/periode KRS tersedia, lalu klik **Pindai kelas** lagi. |
 
-Contoh: `node warkrs-bot.js config set RETRY_DELAY_MS 8000`
+## Batasan
 
----
+Target diproses berurutan. Status berhasil masih berasal dari interpretasi
+respons server dan belum diverifikasi otomatis terhadap daftar KRS. Kelas
+cadangan, antrean bergiliran, dan auto-update belum tersedia. Selalu periksa
+hasil akhir di SIAKAD.
 
-## 🔐 Keamanan untuk Developer
+## Lisensi
 
-⚠️ **JANGAN commit file ini** (sudah di `.gitignore`):
-
-| File | Isi |
-|---|---|
-| `warkrs-config.json` | Cookie sesi login & kredensial |
-| `warkrs-state.json` | Target & data pribadi |
-| `.warkrs-profile-*` | Profil browser berisi sesi login |
-| `captcha-debug/` | Gambar captcha hasil debug |
-
-Untuk pengguna baru: file config/state dibuat otomatis dengan nilai default — tidak perlu disertakan di repo.
-
----
-
-## 🩺 Troubleshooting
-
-| Gejala | Solusi |
-|---|---|
-| `Brave/Chrome masih terbuka! Profil asli terkunci` | Tutup browser dulu (termasuk proses background), lalu ulangi |
-| `Sesi login kedaluwarsa` | Isi `SIAKAD_USERNAME`/`SIAKAD_PASSWORD` di tab Config → login otomatis; atau login manual di tab SIAKAD |
-| Cloudflare `Pemeriksaan Keamanan` berulang | Bot otomatis klik checkbox Turnstile dengan gerakan mouse manusiawi; cooldown mulai 45s dan naik bertahap hanya bila kena beruntun, lalu reset setelah berhasil. Kalau masih sering, perbesar `RETRY_DELAY_MS` |
-| Kode prodi salah / `tidak ditemukan` | Gunakan idkelas **numerik** (dari hasil scan), bukan kode `IF25-...` |
-| Captcha matematika tidak terbaca | Lihat `warkrs-debug-captcha.txt` & folder `captcha-debug/` untuk diagnosis |
-
----
-
-## 📜 Lisensi
-
-MIT — silakan gunakan, modifikasi, dan distribusikan.
-
----
-
-> **ORANG JAHAT TERLAHIR DARI ORANG BAIK YANG KALAH WAR KRS AWKAWKAWK**
+Proyek ini menggunakan [lisensi MIT](LICENSE).

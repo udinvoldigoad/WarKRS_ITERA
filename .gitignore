@@ -1,26 +1,32 @@
-# ── Keamanan: JANGAN commit sesi login & data pribadi ─────────────
-# Profil browser (berisi sesi login SIAKAD)
+# Data pribadi dan sesi login
+data/
 .warkrs-profile*/
-
-# Config & state (berisi COOKIE sesi login + target pribadi)
 warkrs-config.json
 warkrs-state.json
 warkrs-debug-captcha.txt
-
-# Konfigurasi opencode (berisi API key MCP)
-opencode.json
-
-# ── Dependensi & file sistem ───────────────────────────────────────
-node_modules/
-*.log
-.DS_Store
-Thumbs.db
-
-# ── File temp / diagnostik ─────────────────────────────────────────
-_*.js
-_*.json
-_tmp/
-
 captcha-debug/
 eng.traineddata
 
+# Konfigurasi lokal dan kredensial
+.env
+.env.*
+!.env.example
+opencode.json
+
+# Dependensi dan hasil build
+node_modules/
+build/
+dist/
+coverage/
+*.log
+
+# File sementara dan diagnostik lokal
+_*.js
+_*.json
+_tmp/
+*.tmp
+
+# File sistem
+.DS_Store
+Thumbs.db
+Desktop.ini

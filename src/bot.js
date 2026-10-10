@@ -23,7 +23,8 @@ function getAsk() {
 }
 
 // ─── FILE PENYIMPANAN ───────────────────────────────────────────────────────
-const DIR = __dirname;
+const DIR = process.env.WARKRS_DATA_DIR || path.join(__dirname, "..", "data", "legacy");
+fs.mkdirSync(DIR, { recursive: true });
 const CONFIG_FILE = path.join(DIR, "warkrs-config.json");
 const STATE_FILE = path.join(DIR, "warkrs-state.json");
 
@@ -41,6 +42,9 @@ const DEFAULT_CONFIG = {
   RELOAD_EVERY_ATTEMPTS: 15,                 // Reload halaman tiap N percobaan (refresh token)
   HTTP_TIMEOUT_MS: 60000,                    // Timeout halaman (ms)
   SOUND_ON: true,                            // Beep saat berhasil
+  NOTIFY_SUCCESS: true,
+  NOTIFY_FAILURE: true,
+  CLOUDFLARE_AUTO_VERIFY: true,
   TELEGRAM_BOT_TOKEN: "",                    // Isi jika pakai notif Telegram
   TELEGRAM_CHAT_ID: "",                      // Chat ID / user ID Telegram kamu
   BROWSER_PATH: "",                          // Path browser manual (kosongkan = pakai BROWSER)
@@ -108,8 +112,6 @@ function ts() {
 let statusLine = "";
 
 // ── Panel mode (UI di browser) ─────────────────────────────────────────────
-const PANEL_PORT = 8765;
-const PANEL_URL = `http://127.0.0.1:${PANEL_PORT}/`;
 let panelLogs = [];
 let panelLogSeq = 0;
 let panelLastStatus = "";
@@ -117,13 +119,6 @@ let panelSks = {};
 let panelBrowser = null;
 let panelPage = null;
 let warActive = false;
-// Promise yang selesai setelah alur navigasi+login AWAL panel beres (termasuk
-// nunggu login manual bila perlu). Action "war"/"scan" wajib menunggu ini
-// dulu sebelum menyentuh panelPage — kalau tidak, klik WAR yang kepencet
-// terlalu cepat setelah panel dibuka bisa berbarengan dengan alur login awal
-// cmdPanel(), dua-duanya navigasi ke page yang SAMA secara bersamaan
-// (checkbox Turnstile terus kereset, captcha kebaca kosong berulang).
-let panelPageReady = null;
 let securityStrike = 0; // jumlah kenangan Cloudflare beruntun → backoff bertahap
 
 // Cooldown Cloudflare naik bertahap tiap kena beruntun (45s → 90s → 180s → …,
@@ -141,6 +136,10 @@ function pushPanelLog(type, msg, sound) {
 }
 
 function log(msg, type = "info", opts) {
+  if (process.send && opts && ["success", "error"].includes(opts.sound)) {
+    const enabled = opts.sound === "success" ? CONFIG.NOTIFY_SUCCESS : CONFIG.NOTIFY_FAILURE;
+    if (enabled) process.send({ type: "notification", kind: opts.sound, message: String(msg) });
+  }
   clearStatus();
   pushPanelLog(type, msg, opts && opts.sound);
   if (opts && opts.sound) playSound(opts.sound);
@@ -210,6 +209,8 @@ function makeWav(notes) {
 
 function playSound(type) {
   if (!CONFIG.SOUND_ON) return;
+  if (type === "success" && !CONFIG.NOTIFY_SUCCESS) return;
+  if (type === "error" && !CONFIG.NOTIFY_FAILURE) return;
   const notes = SOUND_PATTERNS[type] || SOUND_PATTERNS.error;
   try {
     const cp = require("child_process");
@@ -543,6 +544,7 @@ function detectBrowsers() {
 }
 
 function findBrowser() {
+  if (process.env.WARKRS_BROWSER_PATH && fs.existsSync(process.env.WARKRS_BROWSER_PATH)) return process.env.WARKRS_BROWSER_PATH;
   if (CONFIG.BROWSER_PATH && fs.existsSync(CONFIG.BROWSER_PATH)) return CONFIG.BROWSER_PATH;
   const wanted = (CONFIG.BROWSER || "auto").toLowerCase();
   if (wanted === "auto") {
@@ -723,7 +725,7 @@ async function waitOutChallenge(page, timeoutMs = 90000) {
       .evaluate(() => {
         const b = document.body;
         const txt = (document.title || "") + " " + (b ? b.innerText || "" : "");
-        return /Pemeriksaan Keamanan|Memverifikasi Browser|Memeriksa Keamanan Browser/i.test(txt);
+        return /Pemeriksaan Keamanan|Memverifikasi Browser|Memeriksa Keamanan Browser|checking your browser|verify you are human|verifying you are human|just a moment/i.test(txt);
       })
       .catch(() => false);
     if (!flagged) return true;
@@ -804,6 +806,10 @@ async function clickCheckboxReal(handle) {
 }
 
 async function solveTurnstile(page, timeoutMs = 30000) {
+  if (!CONFIG.CLOUDFLARE_AUTO_VERIFY) {
+    log("Verifikasi Cloudflare manual: selesaikan di jendela browser SIAKAD.", "warn");
+    return waitOutChallenge(page, timeoutMs);
+  }
   const start = Date.now();
   let verified = false;
   while (Date.now() - start < timeoutMs) {
@@ -1161,7 +1167,7 @@ async function solveCaptcha(page, tag) {
   try {
     if (!Tesseract) return { text: "", answer: "" };
     if (!__ocrWorker) {
-      __ocrWorker = await Tesseract.createWorker("eng", 1, { logger: () => {} });
+      __ocrWorker = await Tesseract.createWorker("eng", 1, { cachePath: DIR, logger: () => {} });
       try {
         // TANPA whitelist digit-saja: soalnya kalimat penuh ("Berapa hasil
         // dari 8 x 2 ?"), bukan cuma angka. Whitelist yang cuma izinkan
@@ -1536,7 +1542,7 @@ async function spamCourse(page, course, reloadCounter) {
         course.status = "gagal";
         course.log = `${shortMessage(result.message)} (error permanen)`;
         clearStatus();
-        log(`⛔ [${label}] ${shortMessage(result.message)} — error permanen, lewati.`, "error");
+        log(`⛔ [${label}] ${shortMessage(result.message)} — error permanen, lewati.`, "error", { sound: "error" });
         await sendTelegram(`⛔ <b>${label}</b>: ${shortMessage(result.message)} — dihentikan (error permanen).`);
         persist();
         return false;
@@ -1601,7 +1607,7 @@ async function spamCourse(page, course, reloadCounter) {
   if (course.status === "gagal") {
     course.log = `Berhenti di percobaan #${attempt}. ${lastMsg}`;
     clearStatus();
-    log(`❌ [${label}] Spam dihentikan di percobaan #${attempt}.`, "error");
+    log(`❌ [${label}] Spam dihentikan di percobaan #${attempt}.`, "error", state.aborted ? undefined : { sound: "error" });
   }
   persist();
   return course.status === "berhasil";
@@ -1659,6 +1665,7 @@ async function runWar(browser, page) {
   };
   process.on("SIGINT", onSigint);
 
+  try {
   log(`⚔ WAR KRS dimulai — ${state.courses.length} target · delay ${CONFIG.RETRY_DELAY_MS}ms · limit ${CONFIG.SPAM_LIMIT || "∞"}`, "info");
   log("🌐 Jendela browser otomatis dibuka — JANGAN ditutup selama war.", "info");
   await sendTelegram("🚀 WAR KRS dimulai! Menargetkan " + state.courses.length + " matkul.");
@@ -1755,14 +1762,17 @@ async function runWar(browser, page) {
   const summary = `🏁 Selesai! Berhasil mengambil ${successCount} dari ${total} target.`;
   log(summary, successCount === total ? "success" : "warn");
   await sendTelegram(summary);
-  if (state.aborted) log("⛔ Dihentikan pengguna. Jalankan lagi \"node warkrs-bot.js war\" untuk lanjut.", "warn");
+  if (state.aborted) log("⛔ Dihentikan pengguna. Jalankan lagi \"node src/bot.js war\" untuk lanjut.", "warn");
   persist();
+  } finally {
+    process.removeListener("SIGINT", onSigint);
+  }
 }
 // ─── HELPERS PERINTAH ───────────────────────────────────────────────────────
 function handleFatal(e) {
   if (e.code === "SESSION_EXPIRED") {
     log("🔒 Belum login / sesi kedaluwarsa di browser otomatis.", "error");
-    log('   Jalankan: node warkrs-bot.js login   (login sekali, tersimpan)', "warn");
+    log('   Jalankan: node src/bot.js login   (login sekali, tersimpan)', "warn");
   } else if (e.code === "SECURITY") {
     log("🛡 Cloudflare challenge tidak teratasi otomatis. Cek jendela browser otomatis.", "error");
   } else if (e.code === "BROWSER") {
@@ -1847,7 +1857,7 @@ async function cmdLogin() {
     log("👤 Silakan LOGIN di jendela browser. Menunggu sampai login terdeteksi...", "info");
     const ok = await waitForLogin(page);
     if (ok) log("✅ Login berhasil terdeteksi. Sesi tersimpan untuk perintah berikutnya.", "success");
-    else log("⛔ Waktu habis (10 menit) — coba lagi dengan: node warkrs-bot.js login", "error");
+    else log("⛔ Waktu habis (10 menit) — coba lagi dengan: node src/bot.js login", "error");
   });
 }
 
@@ -1917,7 +1927,7 @@ async function promptPick(name, kelas, pilihan) {
 async function cmdAdd(args) {
   const lines = args.join(" ").split(/[\n;]+/).map((s) => s.trim()).filter(Boolean);
   if (lines.length === 0) {
-    log('Contoh: node warkrs-bot.js add "Kapita Selekta - RA"', "warn");
+    log('Contoh: node src/bot.js add "Kapita Selekta - RA"', "warn");
     return;
   }
 
@@ -2009,7 +2019,7 @@ async function cmdAdd(args) {
 
 function cmdList() {
   if (state.courses.length === 0) {
-    log('Belum ada target. Tambah dengan: node warkrs-bot.js add "Nama - Kelas"', "info");
+    log('Belum ada target. Tambah dengan: node src/bot.js add "Nama - Kelas"', "info");
     return;
   }
   state.courses.forEach((c, i) => {
@@ -2025,7 +2035,7 @@ function cmdList() {
 function cmdRemove(args) {
   const id = args[0];
   if (!id) {
-    log("Contoh: node warkrs-bot.js remove 43254", "warn");
+    log("Contoh: node src/bot.js remove 43254", "warn");
     return;
   }
   const before = state.courses.length;
@@ -2110,7 +2120,7 @@ function cmdFixState() {
 
 async function cmdWar() {
   if (state.courses.length === 0) {
-    log('Belum ada target. Tambah dulu: node warkrs-bot.js add "Nama - Kelas"', "error");
+    log('Belum ada target. Tambah dulu: node src/bot.js add "Nama - Kelas"', "error");
     process.exit(1);
   }
   const pending = state.courses.filter((c) => c.status !== "berhasil");
@@ -2157,12 +2167,12 @@ ${ANSI.bold}PERINTAH:${ANSI.reset}
   ${ANSI.cyan}tgtest${ANSI.reset}             Test notifikasi Telegram
 
 ${ANSI.bold}ALUR PAKAI (sekali setup):${ANSI.reset}
-  node warkrs-bot.js doctor      ← cek semuanya dulu
-  node warkrs-bot.js login       ← login di jendela otomatis (sekali, tersimpan)
-  node warkrs-bot.js scan kapita
-  node warkrs-bot.js add "Kapita Selekta - RA"
-  node warkrs-bot.js list
-  node warkrs-bot.js war         ← biarkan berjalan, browser otomatis dibuka
+  node src/bot.js doctor      ← cek semuanya dulu
+  node src/bot.js login       ← login di jendela otomatis (sekali, tersimpan)
+  node src/bot.js scan kapita
+  node src/bot.js add "Kapita Selekta - RA"
+  node src/bot.js list
+  node src/bot.js war         ← biarkan berjalan, browser otomatis dibuka
 
 ${ANSI.gray}Jangan tutup jendela browser saat war berjalan. Kalau sesi kedaluwarsa,
 script akan menunggu kamu login ulang di jendela itu lalu lanjut otomatis.${ANSI.reset}
@@ -2283,89 +2293,6 @@ async function cmdChooseBrowser() {
 // Panel dibuka sebagai TAB terpisah di browser otomatis (bukan iframe), jadi
 // bebas mixed-content/CSP. Tab SIAKAD dipakai untuk automasi war/scan.
 
-function sendJson(res, obj) {
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.end(JSON.stringify(obj));
-}
-
-function handleActionSafe(fn) {
-  return async (req, res) => {
-    try {
-      const out = await fn();
-      sendJson(res, out);
-    } catch (e) {
-      sendJson(res, { ok: false, message: e.message });
-    }
-  };
-}
-
-function startPanelServer() {
-  const http = require("http");
-  const panelHtml = fs.readFileSync(path.join(DIR, "panel.html"), "utf8");
-
-  const server = http.createServer((req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    if (req.method === "OPTIONS") {
-      res.writeHead(204);
-      return res.end();
-    }
-
-    const url = new URL(req.url, PANEL_URL);
-
-    if (req.method === "GET" && url.pathname === "/") {
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.setHeader("Cache-Control", "no-store");
-      return res.end(panelHtml);
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/state") {
-      return sendJson(res, {
-        courses: state.courses,
-        config: CONFIG,
-        warRunning: warActive,
-        lastStatus: panelLastStatus,
-        sks: panelSks,
-        availableLen: state.available.length,
-      });
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/available") {
-      return sendJson(res, {
-        list: state.available.map((c) => ({ idkelas: c.idkelas, kode: c.kode, kelas: c.kelas, label: c.label })),
-      });
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/logs") {
-      const since = parseInt(url.searchParams.get("since") || "0", 10);
-      const rows = panelLogs.filter((l) => l.seq > since);
-      return sendJson(res, { rows, next: panelLogSeq });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/action") {
-      let body = "";
-      req.on("data", (c) => (body += c));
-      req.on("end", async () => {
-        try {
-          const parsed = JSON.parse(body || "{}");
-          const out = await handleAction(parsed.action, parsed.data || {});
-          sendJson(res, out);
-        } catch (e) {
-          sendJson(res, { ok: false, message: e.message });
-        }
-      });
-      return;
-    }
-
-    res.writeHead(404);
-    res.end("404");
-  });
-
-  server.listen(PANEL_PORT, "127.0.0.1");
-  return server;
-}
-
 function addById(id) {
   const known = state.available.find((c) => c.idkelas === id);
   if (!known) return { ok: false, message: `idkelas ${id} tidak dikenal — pindai dulu.` };
@@ -2439,6 +2366,9 @@ async function actionScan() {
 }
 
 async function handleAction(action, data) {
+  if (warActive && ["scan", "add", "remove", "clear", "reset", "fixstate", "browser", "config_set"].includes(action)) {
+    return { ok: false, message: "Hentikan WAR sebelum mengubah target atau pengaturan." };
+  }
   switch (action) {
     case "add":
       if (data.id) return addById(data.id);
@@ -2452,15 +2382,11 @@ async function handleAction(action, data) {
       persist();
       return { ok: true };
     case "scan":
-      if (panelPageReady) { try { await panelPageReady; } catch (e) {} }
       return actionScan();
     case "war":
       if (warActive) return { ok: false, message: "WAR sudah berjalan." };
       if (!state.courses.length) return { ok: false, message: "Belum ada target." };
       if (!panelPage) return { ok: false, message: "Browser belum siap." };
-      // Tunggu alur login-awal beres dulu — cegah rebutan navigasi di page
-      // yang sama dengan cmdPanel() (lihat komentar di deklarasi panelPageReady).
-      if (panelPageReady) { try { await panelPageReady; } catch (e) {} }
       state.courses.forEach((c) => { if (c.status !== "berhasil") { c.status = "antri"; c.retries = 0; } });
       persist();
       warActive = true;
@@ -2512,100 +2438,6 @@ async function handleAction(action, data) {
   }
 }
 
-// Launch panel: server + browser + suntik overlay + buka SIAKAD.
-async function cmdPanel() {
-  const server = startPanelServer();
-  log(`🖥 Panel aktif: ${PANEL_URL}`, "success");
-  log("🌐 Membuka browser…", "info");
-
-  let browser;
-  try {
-    browser = await launchBrowser();
-  } catch (e) {
-    server.close();
-    handleFatal(e);
-    return;
-  }
-  panelBrowser = browser;
-
-  // Tab 1: SIAKAD (dipakai automasi war/scan/login)
-  const page = await getPage(browser);
-  panelPage = page;
-
-  // Tab 2: Panel UI (tab terpisah → bebas mixed-content/CSP). Kalau server
-  // belum siap / URL tidak kebuka, jangan biarkan user melihat tab blank —
-  // tunggu server siap lalu coba lagi sebelum menyerah.
-  const panelTab = await browser.newPage();
-  const openPanel = async () => {
-    await panelTab.goto(PANEL_URL, { waitUntil: "domcontentloaded", timeout: 15000 });
-  };
-  try {
-    await openPanel();
-    log("✅ Panel dibuka di tab baru — alihkan ke tab 'http://127.0.0.1:8765'.", "success");
-  } catch (e) {
-    log("⚠ Panel belum siap — mencoba lagi… (" + String(e.message).slice(0, 80) + ")", "warn");
-    let retried = false;
-    for (let i = 0; i < 5 && !retried; i++) {
-      await sleep(1500);
-      try {
-        await openPanel();
-        retried = true;
-      } catch (e2) {}
-    }
-    if (!retried) {
-      log("⚠ Gagal membuka tab panel setelah dicoba ulang: " + e.message, "error");
-      log("   Ketik manual di address bar: " + PANEL_URL, "warn");
-    }
-  }
-  try { await panelTab.bringToFront(); } catch (e) {}
-
-  // Alur navigasi+login awal dijalankan lewat panelPageReady (bukan langsung
-  // di-await di sini) supaya log "Panel siap" tetap tampil cepat SEKALIGUS
-  // action lain (war/scan) tetap bisa menunggu alur ini beres lewat promise
-  // yang sama — tidak dobel-navigasi ke page yang sama seperti sebelumnya.
-  panelPageReady = (async () => {
-    try {
-      await ensureKrsPage(page);
-    } catch (e) {
-      if (e.code === "SESSION_EXPIRED") {
-        log("🔒 Belum login — mencoba login otomatis...", "warn");
-        try { await page.goto(CONFIG.BASE_URL, { waitUntil: "domcontentloaded", timeout: CONFIG.HTTP_TIMEOUT_MS }); } catch (e2) {}
-        await waitOutChallenge(page);
-        await solveTurnstile(page);
-        const autoOk = await autoLogin(page);
-        if (autoOk) {
-          log("✅ Login otomatis berhasil — membuka halaman KRS.", "success");
-          try { await ensureKrsPage(page); } catch (e3) { log("⚠ Gagal buka KRS: " + e3.message, "warn"); }
-        } else {
-          log("⚠ Login otomatis gagal/absen kredensial — login di TAB SIAKAD (panel ada di tab sebelah).", "warn");
-          const ok = await waitForLogin(page);
-          if (ok) {
-            log("✅ Login terdeteksi — membuka halaman KRS.", "success");
-            try { await ensureKrsPage(page); } catch (e3) { log("⚠ Gagal buka KRS: " + e3.message, "warn"); }
-          }
-        }
-      } else if (e.code === "SECURITY") {
-        log("🛡 Cloudflare challenge tidak lolos — cek jendela browser.", "error");
-      } else {
-        log("⚠ Gagal buka KRS: " + e.message, "warn");
-      }
-    }
-  })();
-  panelPageReady.catch(() => {});
-
-  log("✅ Panel siap — operasikan semua lewat panel. (Ctrl+C untuk menutup)", "success");
-  await new Promise((resolve) => {
-    const onSigint = () => {
-      process.removeListener("SIGINT", onSigint);
-      console.log("\nMenutup panel…");
-      try { server.close(); } catch (e) {}
-      if (browser && browser.connected) { browser.close().catch(() => {}); }
-      resolve();
-    };
-    process.on("SIGINT", onSigint);
-  });
-}
-
 // ─── MAIN ───────────────────────────────────────────────────────────────────
 async function main() {
   const [cmd, ...args] = process.argv.slice(2);
@@ -2613,6 +2445,18 @@ async function main() {
     return cmdMenu();
   }
   switch ((cmd || "").toLowerCase()) {
+    case "desktop": return require("./desktop/engine").start({
+      CONFIG, state, detectBrowsers, findBrowser, launchBrowser, getPage, isLoggedIn,
+      ensureKrsPage, solveTurnstile, handleAction, persist,
+      attach(browser, page) { panelBrowser = browser; panelPage = page; },
+      snapshot() {
+        const config = { ...CONFIG };
+        for (const key of ["SIAKAD_PASSWORD", "TELEGRAM_BOT_TOKEN", "COOKIE"]) delete config[key];
+        return { courses: state.courses, config, warRunning: warActive, lastStatus: panelLastStatus,
+          sks: panelSks, available: state.available, logs: panelLogs };
+      },
+      abort() { state.aborted = true; },
+    });
     case "doctor":  return cmdDoctor();
     case "login":   return cmdLogin();
     case "scan":    return cmdScan(args);
@@ -2625,7 +2469,6 @@ async function main() {
     case "tgtest":  return cmdTgTest();
     case "browser": return cmdChooseBrowser();
     case "fixstate": return cmdFixState();
-    case "panel":   return cmdPanel();
     case "help":
     case "":
       return cmdHelp();
